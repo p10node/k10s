@@ -119,6 +119,10 @@ Tag, then post the highlight and one frame. Keep it to three lines. Link the
 release, not the repo — download counts are one of the few honest metrics
 available.
 
+The channel post is three lines; the release page itself is the long form.
+Write it as `docs/releases/<tag>.md` *before* tagging — the workflow picks it
+up and puts GitHub's generated commit list underneath.
+
 ## The demo GIF
 
 The most important asset the project does not have yet. Read this before
@@ -187,7 +191,11 @@ The work already produces the material; the trick is not losing it.
   backlog.
 - **`--generate-notes` on every release** (already wired in
   `.github/workflows/release.yml`) means release notes write themselves from
-  those subjects — one more reason the subjects matter.
+  those subjects — one more reason the subjects matter. That generated list
+  is the floor, not the release post: drop a hand-written
+  `docs/releases/<tag>.md` in first and the workflow puts it above the list.
+  [`v0.1.0`](releases/v0.1.0.md) is the shape — positioning line, one frame,
+  install, what-you-get, and an honest *known limits* section.
 - **Keep a `NOTES.md` scratch file** of "that was annoying" moments while
   coding. Every one of them is a post. They are impossible to recover a week
   later.
