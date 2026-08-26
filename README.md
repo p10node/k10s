@@ -27,38 +27,13 @@ already knows your cluster, namespace and selected object.**
 
 ---
 
-```
- ⎈ k10s  │  prod-eu-west-1  │  ver v1.31.4  │  nodes 2/3 ready ns default ▾  │  theme tokyo-night ⟳
+<div align="center">
 
- CPU  ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱  38%  18.4/48 cores    MEM  ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱  42%  82/192 GiB
- ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-╭─ Resources ────────╮╭─ Pods · default ───────── [ f to search ] [ zoom ] ╮╭─ Actions ────────────╮
-│ WORKLOADS          ││     NAME                READY  STATUS      RESTARTS││ po/api-gateway-7d9f4…│
-│ ▸ Pods           14││╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌││╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│   Deployments     7││▌  1 api-gateway-7d9f4…  1/1    Running     0       ││ [d] Describe         │
-│   StatefulSets    3││   2 api-gateway-7d9f4…  1/1    Running     0       ││ [y] YAML             │
-│   DaemonSets      2││   3 auth-service-5c7b…  1/1    Running     2       ││ [l] Logs             │
-│   Jobs            2││   4 billing-worker-6f…  0/1    CrashLoop…  17      ││ [s] Shell            │
-│   CronJobs        2││   5 cache-redis-0       1/1    Running     0       ││ [p] Port Forward     │
-│                    ││   6 cache-redis-1       1/1    Running     0       ││ [e] Edit             │
-│ NETWORK            ││   7 migrate-db-29341-…  0/1    Completed   0       ││ [m] Top (metrics)    │
-│   Services        4││   8 notify-consumer-8…  1/1    Running     1       ││╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│   Ingresses       2││   9 payment-api-9d7c8…  2/2    Running     0       ││ [D] Delete           │
-│                    ││  10 payment-api-9d7c8…  1/2    Pending     0       ││                      │
-│ CONFIG             ││  11 search-indexer-7c…  1/1    Running     0       ││                      │
-│   ConfigMaps      3││  12 web-frontend-6b8c…  1/1    Running     0       ││                      │
-│   Secrets         3││  13 web-frontend-6b8c…  1/1    Running     0       ││                      │
-│                    ││  14 web-frontend-6b8c…  1/1    Terminati…  0       ││                      │
-│ STORAGE            ││                                                    ││                      │
-│   PVCs            3││                                                    ││                      │
-╰────────────────────╯╰────────────────────────────────────────────────────╯╰──────────────────────╯
-╭─ Command ────────────────────────────────────────────────────────────────────── [ grow ] [ CMD ] ╮
-│ ❯ kubectl get pods -A · /ns · :help · ctrl+a for AI                                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ● cli → kubectl   ·   change it any time with /sett… tab panes · enter open · ctrl+p search · f fin
-```
+<img src="assets/screenshot.png" alt="k10s running in a terminal: resource sidebar, pod table with live status, and an action pane for the selected pod" width="960">
 
-<sub>Real frame, rendered headlessly by `just shot` - every screenshot in these docs is generated from the code, never hand-drawn.</sub>
+<sub>A real terminal capture of `k10s` running - `just screenshot`, on the offline demo backend. Every frame in these docs comes out of the running binary, never hand-drawn.</sub>
+
+</div>
 
 ## Why k10s
 
@@ -298,12 +273,15 @@ The barrier is low on purpose. `just` lists every recipe:
 ```bash
 just dev            # run from source
 just shot 140 44    # render one frame headlessly - no TTY, no cluster
+just screenshot     # capture the README hero from a real terminal (vhs)
 just check          # fmt + vet + test, in the order that fails fastest
 ```
 
 `cmd/shot` is why UI work here is pleasant: you can iterate on layout, replay
 keystrokes (`just shot 140 44 j,j,d`) and diff frames without a terminal or a
-cluster. Every screenshot in this README came out of it.
+cluster. Nothing in these docs is drawn by hand - the frames come from that
+renderer, the hero image from `just screenshot` driving the real binary in a
+real terminal.
 
 Good first issues live in [roadmap.md → possible next
 steps](docs/roadmap.md#possible-next-steps): more kinds, click-to-sort

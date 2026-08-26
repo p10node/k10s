@@ -144,6 +144,19 @@ tag ver:
 demo: install
     vhs assets/demo.tape
 
+# Needs charmbracelet/vhs, imagemagick and a JetBrainsMono Nerd Font
+# (`brew install vhs imagemagick && brew install --cask font-jetbrains-mono-nerd-font`).
+# Runs against the offline demo backend, so no real cluster ends up in the
+# docs. The magick pass palettes the PNG — a terminal frame has ~250 colours,
+# so it costs nothing visible and cuts the file to a third.
+
+# Capture the README hero: a real terminal frame of the running TUI.
+screenshot: build
+    rm -f /tmp/k10s-screenshot-config.yaml
+    vhs assets/screenshot.tape
+    magick assets/screenshot.png -colors 256 PNG8:assets/screenshot.png
+    @ls -lh assets/screenshot.png
+
 # ---- logo -----------------------------------------------------------------
 
 # Regenerate every logo SVG and re-export the PNGs. Needs python3 + rsvg-convert
