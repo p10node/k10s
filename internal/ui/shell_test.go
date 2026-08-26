@@ -155,6 +155,23 @@ func TestDetachKeyClosesTheSession(t *testing.T) {
 	}
 }
 
+// ctrl+c is the single most common thing you press in a shell — interrupting
+// whatever is running in the pod. It must not quit k10s.
+func TestCtrlCGoesToThePodNotTheApp(t *testing.T) {
+	m, sh := newShellModel(t)
+	openShell(t, m, sh)
+
+	if cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd != nil {
+		t.Error("ctrl+c inside a shell must not quit k10s")
+	}
+	if m.mode != modeShell {
+		t.Error("ctrl+c should leave the shell open")
+	}
+	if got := sh.sent(); got != "\x03" {
+		t.Errorf("sent %q, want the interrupt byte forwarded to the pod", got)
+	}
+}
+
 func TestShellEndsWhenTheStreamCloses(t *testing.T) {
 	m, sh := newShellModel(t)
 	openShell(t, m, sh)

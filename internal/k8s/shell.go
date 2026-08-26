@@ -5,7 +5,6 @@ import (
 	"io"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 
@@ -74,16 +73,9 @@ func (s *Store) ShellSession(kind, ns, name string, cols, rows int) (domain.Shel
 
 	req := s.c.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Namespace(effectiveNS(ns)).Name(pod).SubResource("exec")
-	req.VersionedParams(&corev1.PodExecOptions{
-		Container: container,
-		Command:   []string{"/bin/sh", "-c", "(bash || sh)"},
-		Stdin:     true,
-		Stdout:    true,
-		Stderr:    true,
-		TTY:       true,
-	}, scheme.ParameterCodec)
+	req.VersionedParams(ttyExecOptions(container, shellCmd), scheme.ParameterCodec)
 
-	exec, err := remotecommand.NewSPDYExecutor(s.c.RestConfig, "POST", req.URL())
+	exec, err := newExecutor(s.c.RestConfig, req.URL())
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +98,10 @@ func (s *Store) ShellSession(kind, ns, name string, cols, rows int) (domain.Shel
 		defer close(sess.out)
 		defer pr.Close()
 		err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-			Stdin:             pr,
-			Stdout:            ow,
-			Stderr:            ow,
+			Stdin:  pr,
+			Stdout: ow,
+			// Stderr stays nil to match the request above: with a TTY the
+			// pod has only one output stream.
 			Tty:               true,
 			TerminalSizeQueue: sizeQueue{ch: sess.sizes, done: ctx.Done()},
 		})

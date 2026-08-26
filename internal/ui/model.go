@@ -812,6 +812,13 @@ func (m *Model) switchContextCmd(name string) tea.Cmd {
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
+	// A running shell owns the keyboard: everything except the detach key
+	// belongs to the program in the pod — ctrl+c included, since interrupting
+	// a command in there is the whole reason you reach for it.
+	if m.mode == modeShell {
+		return m.handleShellKey(msg)
+	}
+
 	if key == "ctrl+c" {
 		return tea.Quit
 	}
@@ -845,12 +852,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// theme picker
 	if m.themeOpen {
 		return m.handleThemeKey(msg)
-	}
-
-	// A running shell owns the keyboard: everything except the detach key
-	// belongs to the program in the pod.
-	if m.mode == modeShell {
-		return m.handleShellKey(msg)
 	}
 
 	// prompt captures printable input
