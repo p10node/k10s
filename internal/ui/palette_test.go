@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/domain"
-	"k10s/internal/mock"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/mock"
 )
 
 // ---- enter opens logs, falling back to describe -------------------------

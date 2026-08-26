@@ -3,8 +3,8 @@ package ui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/domain"
-	"k10s/internal/update"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/update"
 )
 
 // IsAsyncMsg reports whether msg is one of this package's own async-result
@@ -15,7 +15,7 @@ import (
 // a self-perpetuating Cmd like textinput's cursor blink.
 func IsAsyncMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case textResultMsg, actionResultMsg, ctxSwitchMsg, logStartMsg, logOlderMsg, shellStartMsg, editFetchedMsg, editExitMsg, portForwardMsg, updateCheckMsg, updateAppliedMsg:
+	case textResultMsg, actionResultMsg, srcConnectedMsg, ctxSwitchMsg, logStartMsg, logOlderMsg, shellStartMsg, editFetchedMsg, editExitMsg, portForwardMsg, updateCheckMsg, updateAppliedMsg:
 		return true
 	}
 	return false
@@ -42,6 +42,16 @@ type textResultMsg struct {
 type actionResultMsg struct {
 	toast string
 	err   error
+}
+
+// srcConnectedMsg lands when the backend built at startup is ready (or when
+// building it failed and main.go handed back the offline demo instead). gen
+// identifies the attempt, so a slow one that lands after the user retargeted
+// the connection can be dropped.
+type srcConnectedMsg struct {
+	gen  int
+	src  domain.Source
+	warn string
 }
 
 // ctxSwitchMsg lands after switching kube context, which for the real

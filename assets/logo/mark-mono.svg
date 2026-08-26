@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="k10s">
+  
+  <g>
+    <circle cx="112" cy="112" r="58" fill="none" stroke="currentColor" stroke-width="11"/>
+    <line x1="112.00" y1="91.00" x2="112.00" y2="64.00" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="112.00" cy="40.00" r="6.5" fill="currentColor"/>
+    <line x1="128.42" y1="98.91" x2="149.53" y2="82.07" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="168.29" cy="67.11" r="6.5" fill="currentColor"/>
+    <line x1="132.47" y1="116.67" x2="158.80" y2="122.68" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="182.19" cy="128.02" r="6.5" fill="currentColor"/>
+    <line x1="121.11" y1="130.92" x2="132.83" y2="155.25" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="143.24" cy="176.87" r="6.5" fill="currentColor"/>
+    <line x1="102.89" y1="130.92" x2="91.17" y2="155.25" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="80.76" cy="176.87" r="6.5" fill="currentColor"/>
+    <line x1="91.53" y1="116.67" x2="65.20" y2="122.68" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="41.81" cy="128.02" r="6.5" fill="currentColor"/>
+    <line x1="95.58" y1="98.91" x2="74.47" y2="82.07" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="55.71" cy="67.11" r="6.5" fill="currentColor"/>
+    <circle cx="112" cy="112" r="12" fill="currentColor"/>
+    <g transform="translate(156 148) scale(1.6)"><path d="M0 0 L0 34 L8.4 25.6 L14.6 39.4 L21.4 36 L15 22.6 L26 22.6 Z" fill="currentColor"/></g>
+  </g>
+</svg>

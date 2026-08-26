@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // Contexts are chosen from the main panel, the same way namespaces are —
@@ -60,7 +60,9 @@ func (m *Model) chooseContext() tea.Cmd {
 	}
 	name := choices[clamp(m.ctxIdx, 0, len(choices)-1)]
 	m.mode = modeTable
-	if name == m.src.ClusterInfo().Context {
+	// While connecting, "the current context" is only the one we are
+	// *trying* — picking it again is a retry, not a no-op.
+	if name == m.src.ClusterInfo().Context && !m.connecting {
 		m.toast = "already on " + name
 		return nil
 	}

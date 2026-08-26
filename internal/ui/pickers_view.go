@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // saveButton renders the shared Save affordance used by the pickers.

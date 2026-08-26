@@ -5,7 +5,7 @@
 package mock
 
 import (
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // node is one row of the fake cluster's node list.
@@ -50,7 +50,7 @@ const clusterVersion = "v1.31.4"
 
 // contexts available for /context switching.
 var contexts = []string{
-	"teleport.internal.s3.p10node.onl-S3",
+	"prod-eu-west-1",
 	"eks-staging-apse1",
 	"gke-prod-asia",
 }
@@ -154,8 +154,8 @@ var resources = []resourceDef{
 		Kind: domain.Kind{Key: "ingresses", Name: "Ingresses", Short: "ing", Group: "Network", Namespaced: true,
 			Cols: []string{"NAME", "CLASS", "HOSTS", "ADDRESS", "AGE"}, Allowed: basicActions},
 		Rows: [][]string{
-			{"web", "nginx", "app.p10node.onl", "10.0.9.4", "9d"},
-			{"api", "nginx", "api.p10node.onl", "10.0.9.4", "48d"},
+			{"web", "nginx", "app.example.com", "10.0.9.4", "9d"},
+			{"api", "nginx", "api.example.com", "10.0.9.4", "48d"},
 		},
 	},
 	{
@@ -177,7 +177,7 @@ var resources = []resourceDef{
 		Rows: [][]string{
 			{"db-credentials", "Opaque", "3", "180d"},
 			{"ghcr-pull", "kubernetes.io/dockerconfigjson", "1", "180d"},
-			{"tls-p10node", "kubernetes.io/tls", "2", "44d"},
+			{"tls-example", "kubernetes.io/tls", "2", "44d"},
 		},
 		Extra: []nsRow{
 			{"kube-system", []string{"bootstrap-token-abc123", "bootstrap.kubernetes.io/token", "5", "128d"}},

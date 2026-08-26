@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // Store is the real backend: client-go informers backing live table data,
@@ -282,9 +282,7 @@ func (s *Store) nodeMetric(name string) (metricSample, bool) {
 	return m, ok
 }
 
-func (s *Store) Kinds() []domain.Kind {
-	return append([]domain.Kind(nil), builtinKinds...)
-}
+func (s *Store) Kinds() []domain.Kind { return Kinds() }
 
 func (s *Store) ClusterInfo() domain.ClusterInfo {
 	return domain.ClusterInfo{Context: s.c.CurrentContext, Server: s.c.Server, Version: s.c.Version}

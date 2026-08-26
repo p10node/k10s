@@ -16,11 +16,11 @@ import (
 
 	"github.com/hinshun/vt10x"
 
-	"k10s/internal/ai"
-	"k10s/internal/config"
-	"k10s/internal/domain"
-	"k10s/internal/theme"
-	"k10s/internal/update"
+	"github.com/p10node/k10s/internal/ai"
+	"github.com/p10node/k10s/internal/config"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/theme"
+	"github.com/p10node/k10s/internal/update"
 )
 
 type focusPane int
@@ -184,10 +184,23 @@ type Model struct {
 	mouseOff bool
 
 	initialCtx string
-	portFwds   map[string]func()
-	logStop    func()
-	logCh      <-chan string
-	logGen     int
+	// nsPinned marks a namespace that came from config, so the first
+	// connection doesn't overwrite it with the context's own default.
+	nsPinned bool
+
+	// connect is set when the backend is built in the background (see
+	// connect.go): the UI opens before the cluster answers, and connecting
+	// is what the main panel shows a spinner for. connGen discards a stale
+	// attempt that lands after a newer one was started.
+	connect    func(context string) (domain.Source, string)
+	connecting bool
+	connGen    int
+	connName   string
+
+	portFwds map[string]func()
+	logStop  func()
+	logCh    <-chan string
+	logGen   int
 
 	// Log viewer state. logScroll counts display rows hidden *below* the
 	// view, so 0 means pinned to the newest line.
@@ -262,6 +275,7 @@ func (m *Model) loadConfig() {
 	}
 	if c.Namespace != "" {
 		m.namespace = c.Namespace
+		m.nsPinned = true
 	}
 	if c.AI.Provider == "openai" {
 		m.cfg.provider = 0
@@ -294,9 +308,15 @@ func (m *Model) loadConfig() {
 // never interrupt the UI.
 func (m *Model) saveConfig() {
 	providers := []string{"openai", "anthropic"}
+	// While connecting, ClusterInfo is the placeholder's — saving it would
+	// pin a context we haven't reached yet, so keep whatever config holds.
+	ctx := m.src.ClusterInfo().Context
+	if m.connecting {
+		ctx = m.initialCtx
+	}
 	err := config.Save(config.Config{
 		Theme:     m.th().Name,
-		Context:   m.src.ClusterInfo().Context,
+		Context:   ctx,
 		Namespace: m.namespace,
 		CLI:       m.cli,
 		CLIs:      m.clis,
@@ -486,13 +506,13 @@ func (m *Model) curNamespace() string {
 	return m.namespace
 }
 
-// SetToast overrides the startup status message (used by main.go to report
-// e.g. a fallback to mock mode when no cluster is reachable).
-func (m *Model) SetToast(s string) { m.toast = s }
-
 func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink, m.repaintTick()}
-	if m.initialCtx != "" {
+	if m.connect != nil {
+		// The cluster is reached off the event loop, so the first frame —
+		// spinner and all — is on screen before anything can block.
+		cmds = append(cmds, m.connectCmd(""))
+	} else if m.initialCtx != "" {
 		ctx := m.initialCtx
 		m.initialCtx = ""
 		cmds = append(cmds, m.switchContextCmd(ctx))
@@ -516,6 +536,9 @@ func tickEvery(d time.Duration) tea.Cmd {
 // has synced. Backends that don't report sync state (the offline demo) just
 // get the steady rate.
 func (m *Model) repaintTick() tea.Cmd {
+	if m.connecting {
+		return tickEvery(150 * time.Millisecond)
+	}
 	if sy, ok := m.src.(interface{ Synced(string) bool }); ok {
 		if !sy.Synced(m.curKind().Key) {
 			return tickEvery(150 * time.Millisecond)
@@ -621,6 +644,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateAppliedMsg:
 		return m, m.handleUpdateApplied(msg)
+
+	case srcConnectedMsg:
+		return m, m.handleConnected(msg)
 
 	case ctxSwitchMsg:
 		m.busy = false
@@ -825,6 +851,11 @@ func (m *Model) runAction(okToast string, fn func() error) tea.Cmd {
 }
 
 func (m *Model) switchContextCmd(name string) tea.Cmd {
+	// No backend to switch *from* yet — retarget the connection instead, so
+	// picking a context is a way out of a first connection that is hanging.
+	if _, pending := m.src.(*pendingSource); pending {
+		return m.connectCmd(name)
+	}
 	m.toast = "… switching context"
 	m.startBusy("connecting to " + name)
 	src := m.src

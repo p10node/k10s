@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // The global search palette ("search everything"): one box that finds both

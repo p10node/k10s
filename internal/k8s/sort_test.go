@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 func TestSortRowsByName(t *testing.T) {

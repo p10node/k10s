@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
-	"k10s/internal/domain"
-	"k10s/internal/mock"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/mock"
 )
 
 // ---- two command prefixes ------------------------------------------------

@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%d)
-          STAMP="-X k10s/internal/version.Version=$VERSION -X k10s/internal/version.Commit=$COMMIT -X k10s/internal/version.Date=$DATE"
+          STAMP="-X github.com/p10node/k10s/internal/version.Version=$VERSION -X github.com/p10node/k10s/internal/version.Commit=$COMMIT -X github.com/p10node/k10s/internal/version.Date=$DATE"
           mkdir -p dist
           for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
             os="${p%/*}"; arch="${p#*/}"

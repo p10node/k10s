@@ -14,8 +14,8 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/muesli/termenv"
 
-	"k10s/internal/mock"
-	"k10s/internal/ui"
+	"github.com/p10node/k10s/internal/mock"
+	"github.com/p10node/k10s/internal/ui"
 )
 
 var special = map[string]tea.KeyType{

@@ -115,9 +115,9 @@ the list of what *was* published. It is never approximated.
 `internal/version` holds the stamp:
 
 ```
-go build -ldflags "-X k10s/internal/version.Version=v1.4.0 \
-                   -X k10s/internal/version.Commit=abc1234 \
-                   -X k10s/internal/version.Date=2026-08-26"
+go build -ldflags "-X github.com/p10node/k10s/internal/version.Version=v1.4.0 \
+                   -X github.com/p10node/k10s/internal/version.Commit=abc1234 \
+                   -X github.com/p10node/k10s/internal/version.Date=2026-08-26"
 ```
 
 `just build`, `just install` and `just release` all pass it, taking the

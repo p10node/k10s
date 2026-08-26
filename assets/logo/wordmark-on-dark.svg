@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 192" width="452" height="192" role="img" aria-label="k10s">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7aa2f7"/><stop offset="1" stop-color="#bb9af7"/></linearGradient></defs>
+  <g>
+    <g fill="none" stroke="#c0caf5" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><path d="M24 32 L24 160"/><path d="M78 84 L28 130"/><path d="M48 110 L80 160"/><path d="M114 56 L140 34 L140 160"/><path d="M112 160 L170 160"/><path d="M422 96 C414 80 384 74 370 86 C354 100 362 116 386 121 C412 127 418 141 404 153 C388 166 362 160 356 145"/></g>
+    <circle cx="262" cy="96" r="52" fill="none" stroke="url(#g)" stroke-width="13"/>
+    <line x1="262.00" y1="77.00" x2="262.00" y2="52.00" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="262.00" cy="30.00" r="6" fill="url(#g)"/>
+    <line x1="276.85" y1="84.15" x2="296.40" y2="68.57" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="313.60" cy="54.85" r="6" fill="url(#g)"/>
+    <line x1="280.52" y1="100.23" x2="304.90" y2="105.79" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="326.35" cy="110.69" r="6" fill="url(#g)"/>
+    <line x1="270.24" y1="113.12" x2="281.09" y2="135.64" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="290.64" cy="155.46" r="6" fill="url(#g)"/>
+    <line x1="253.76" y1="113.12" x2="242.91" y2="135.64" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="233.36" cy="155.46" r="6" fill="url(#g)"/>
+    <line x1="243.48" y1="100.23" x2="219.10" y2="105.79" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="197.65" cy="110.69" r="6" fill="url(#g)"/>
+    <line x1="247.15" y1="84.15" x2="227.60" y2="68.57" stroke="url(#g)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="210.40" cy="54.85" r="6" fill="url(#g)"/>
+    <circle cx="262" cy="96" r="11" fill="url(#g)"/>
+    <g transform="translate(302 128) scale(1.15)"><path d="M0 0 L0 34 L8.4 25.6 L14.6 39.4 L21.4 36 L15 22.6 L26 22.6 Z" fill="#1a1b26" stroke="#1a1b26" stroke-width="7.83" stroke-linejoin="round"/><path d="M0 0 L0 34 L8.4 25.6 L14.6 39.4 L21.4 36 L15 22.6 L26 22.6 Z" fill="#f2f6ff"/></g>
+  </g>
+</svg>

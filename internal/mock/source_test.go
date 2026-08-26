@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 func TestSourceRowsNamespaceFiltering(t *testing.T) {

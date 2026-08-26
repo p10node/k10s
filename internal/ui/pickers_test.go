@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/config"
-	"k10s/internal/mock"
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/config"
+	"github.com/p10node/k10s/internal/mock"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // dismissOnboarding closes the first-run settings screen so a test can

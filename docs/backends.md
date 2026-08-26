@@ -7,13 +7,34 @@ UI cannot tell them apart.
 `main.go` tries the live one first and falls back:
 
 ```go
-store, err := k8s.NewStore("", "")   // current kubeconfig context
+store, err := k8s.NewStore("", ctx)   // ctx == "" → current kubeconfig context
 if err != nil {
     return mock.New(""), "mock mode — " + err.Error()
 }
 ```
 
 so k10s always starts, and says in the status bar why it's offline.
+
+That call is never made before the program starts. `main.go` hands it to
+`ui.NewStartup` as `Startup.Connect`, and the UI runs it as a background
+command once the event loop is up:
+
+```go
+ctxNames, curCtx := k8s.KubeContexts("")   // kubeconfig only — no request
+m := ui.NewStartup(ui.Startup{
+    Kinds: k8s.Kinds(), Contexts: ctxNames, Context: curCtx, Connect: newSource,
+})
+```
+
+Until it lands, the model runs against `pendingSource` (`internal/ui/connect.go`),
+a `domain.Source` that serves what kubeconfig already knows — the kind list,
+the context list — and answers `errConnecting` to everything else. The main
+panel shows a spinner meanwhile, so an API server behind a downed VPN, or an
+exec credential plugin that stalls, leaves a working UI on screen instead of
+a blank terminal. Picking a context in `/context` during that wait retargets
+the connection rather than switching from a backend that isn't there yet;
+each attempt carries a generation, so a slow first one landing later is
+dropped instead of overwriting the newer one.
 
 ## Live cluster — `internal/k8s`
 

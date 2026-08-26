@@ -3,7 +3,7 @@ package ui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // ---- theme picker: live preview while browsing ---------------------------

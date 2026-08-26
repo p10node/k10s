@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/config"
-	"k10s/internal/update"
-	"k10s/internal/version"
+	"github.com/p10node/k10s/internal/config"
+	"github.com/p10node/k10s/internal/update"
+	"github.com/p10node/k10s/internal/version"
 )
 
 // Self-update, in three steps that are deliberately separate:

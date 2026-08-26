@@ -65,9 +65,13 @@ is not an error — the built-in defaults (tokyo-night, the kubeconfig's own
 namespace, `kubectl`, Anthropic preset) apply.
 
 `context` is handled differently: it names a kubeconfig context, and
-switching to it means rebuilding the whole client. If the saved context
-differs from the one already connected, `Init()` issues an async context
-switch rather than blocking startup on it.
+switching to it means rebuilding the whole client. Since the first
+connection is itself asynchronous, the saved context is applied when that
+connection lands — and only if it isn't the one already reached, which is
+the usual case. Either way it is an async switch, never a blocking startup.
+
+A namespace read from config is also remembered as pinned, so the first
+connection doesn't overwrite it with the context's own default namespace.
 
 `onboarded` is what suppresses the first-run CLI picker. It is tracked
 separately from `cli` so that choosing the default value still counts as

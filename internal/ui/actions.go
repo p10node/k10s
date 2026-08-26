@@ -1,6 +1,6 @@
 package ui
 
-import "k10s/internal/domain"
+import "github.com/p10node/k10s/internal/domain"
 
 // Action is one button of the right-hand Actions pane.
 type Action struct {

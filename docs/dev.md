@@ -101,6 +101,17 @@ go run ./cmd/shot 140 44 "<keys>" | sed -e $'s/\x1b\\[[0-9;]*m//g' \
 (That awk counts bytes; for a strict check strip ANSI and measure display
 cells — wide glyphs like `⎈` count 1 cell but multiple bytes.)
 
+Two tests in `internal/ui/block_test.go` guard it without a terminal:
+
+- `TestPanelTopBorderNeverExceedsItsWidth` — the top border is the only line
+  whose length depends on the title and the tag, so it is checked directly
+  across widths, long titles and oversized tags. A title is truncated against
+  what the tag leaves behind, and a tag with no room at all is dropped rather
+  than cut (it carries bubblezone markers, so truncating it would corrupt its
+  click target).
+- `TestLongTextTitleKeepsEveryRowAtTerminalWidth` — the same invariant through
+  the real render path: `logs -f <pod>` at 100 columns, every row measured.
+
 If a line goes long, the usual culprit is a style nested inside another
 style's `Render` (the inner reset drops the outer background) — use `padBG`
 and sibling runs instead, never nesting.

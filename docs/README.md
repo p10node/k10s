@@ -13,6 +13,8 @@
 | [update.md](update.md)             | Self-update: version stamps, release matching, installing   |
 | [dev.md](dev.md)                   | Build, tests, headless renderer, width invariant            |
 | [roadmap.md](roadmap.md)           | What's done and what's left                                 |
+| [marketing.md](marketing.md)       | Positioning, channels, launch sequence, repo hygiene        |
+| [build-in-public.md](build-in-public.md) | Post shapes, cadence, the demo GIF, what stays private |
 
 Status: **live** (2026-08-26). k10s talks to a real cluster through
 client-go and falls back to the offline demo when none is reachable.

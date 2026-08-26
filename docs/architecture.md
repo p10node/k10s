@@ -3,7 +3,7 @@
 ## Packages
 
 ```
-main.go                 entrypoint: builds the live backend, falls back to the demo
+main.go                 entrypoint: starts the UI first, connects in background
 cmd/shot/               headless renderer for dev (replays keys, prints one frame)
 internal/domain/        the Source interface + shared types — the whole contract
 internal/k8s/           live backend: client-go informers, describe/YAML/logs/exec/pf
@@ -20,6 +20,7 @@ internal/ui/
   actions.go            the action table (id, hotkey, label, risky)
   commands.go           slash commands + /help text
   msgs.go               async result messages
+  connect.go            startup: pendingSource + the background connect
   update.go             /update + /version: the check, the confirm, the install
   pickers.go/_view.go   onboarding + theme picker
   palette.go/_view.go   global search palette, namespace picker

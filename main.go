@@ -9,21 +9,27 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
-	"k10s/internal/config"
-	"k10s/internal/domain"
-	"k10s/internal/k8s"
-	"k10s/internal/mock"
-	"k10s/internal/ui"
-	"k10s/internal/update"
-	"k10s/internal/version"
+	"github.com/p10node/k10s/internal/config"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/k8s"
+	"github.com/p10node/k10s/internal/mock"
+	"github.com/p10node/k10s/internal/ui"
+	"github.com/p10node/k10s/internal/update"
+	"github.com/p10node/k10s/internal/version"
 )
 
-// newSource tries the real cluster first (current kubeconfig context) and
-// falls back to the offline demo when no cluster is reachable — same
-// behaviour k10s has always documented ("mock mode — not connected to a
-// real cluster"), just now backed by a real attempt first.
-func newSource() (domain.Source, string) {
-	store, err := k8s.NewStore("", "")
+// newSource tries the real cluster first (ctx, or kubeconfig's
+// current-context when empty) and falls back to the offline demo when no
+// cluster is reachable — same behaviour k10s has always documented ("mock
+// mode — not connected to a real cluster"), just now backed by a real
+// attempt first.
+//
+// This can block for a long time: an API server behind a downed VPN, or an
+// exec credential plugin that stalls, both land here. So it is never called
+// before the program starts — the UI runs it as a background command and
+// shows a spinner meanwhile (see ui.Startup).
+func newSource(ctx string) (domain.Source, string) {
+	store, err := k8s.NewStore("", ctx)
 	if err != nil {
 		return mock.New(""), "mock mode — " + err.Error()
 	}
@@ -56,11 +62,16 @@ func main() {
 	zone.NewGlobal()
 	defer zone.Close()
 
-	src, warn := newSource()
-	m := ui.New(src)
-	if warn != "" {
-		m.SetToast(warn)
-	}
+	// Everything the UI needs to draw its first frame comes from kubeconfig
+	// alone — no request, so no hang. The connection itself happens once the
+	// event loop is running.
+	ctxNames, curCtx := k8s.KubeContexts("")
+	m := ui.NewStartup(ui.Startup{
+		Kinds:    k8s.Kinds(),
+		Contexts: ctxNames,
+		Context:  curCtx,
+		Connect:  newSource,
+	})
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {

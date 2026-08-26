@@ -19,7 +19,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // newTestStore builds a Store against fake clientsets (no real cluster, no

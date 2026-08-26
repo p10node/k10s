@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // Block is a fixed-size rectangle of terminal cells. Every line is padded to
@@ -171,13 +171,31 @@ func Panel(th theme.Theme, o PanelOpts, body []string) Block {
 		inner = 1
 	}
 
-	// top border
-	title := trunc(o.Title, inner-4)
-	leftPlain := bH + " " + title + " "
+	// Top border. Between the corners there are exactly `inner` cells:
+	//
+	//	bH + " " + title + " "   +   fill   +   " " + tag + " "
+	//
+	// so the title only gets what the tag leaves behind. Truncating it
+	// against `inner` alone is what used to push long titles (`logs -f
+	// <pod>`, `top <pod>`) past the block's own width, and a Block wider
+	// than it claims drifts every join and overlay after it.
 	rightPlain := ""
 	if o.TagPlain != "" {
 		rightPlain = " " + o.TagPlain + " "
 	}
+	// A tag with no room at all is dropped rather than cut: o.Tag carries
+	// bubblezone markers, so truncating it would corrupt its click target.
+	if lipgloss.Width(rightPlain) > inner-3 {
+		rightPlain = ""
+	}
+	// -4: bH, the two spaces around the title, and one cell of fill kept so
+	// a full-length title never butts up against the tag.
+	avail := inner - 4 - lipgloss.Width(rightPlain)
+	if avail < 0 {
+		avail = 0
+	}
+	title := trunc(o.Title, avail)
+	leftPlain := bH + " " + title + " "
 	fill := inner - lipgloss.Width(leftPlain) - lipgloss.Width(rightPlain)
 	if fill < 0 {
 		fill = 0

@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // The log viewer.

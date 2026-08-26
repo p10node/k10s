@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
-	"k10s/internal/domain"
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 func (m *Model) View() string {
@@ -346,6 +346,19 @@ func (m *Model) viewMain(w, h int) Block {
 	tagStyle := lipgloss.NewStyle().Background(th.Bg).Foreground(th.Accent2)
 	brk := lipgloss.NewStyle().Background(th.Bg).Foreground(th.Border)
 	zoomTag := m.mark("zoom", brk.Render("[ ")+tagStyle.Render(zoomLbl)+brk.Render(" ]"))
+
+	// The first connection takes over the panel: k10s is on screen from the
+	// first frame, so this is where "we are still reaching the cluster"
+	// gets said — never a blank terminal before the program starts.
+	if m.connecting {
+		body := make([]string, 0, h-2)
+		body = append(body, "")
+		body = append(body, m.connectingLines(inner)...)
+		return Panel(th, PanelOpts{
+			Title: "Connecting", Tag: zoomTag, TagPlain: zoomPlain,
+			Focused: focused, W: w, H: h,
+		}, body)
+	}
 
 	// An action in flight takes over the panel: pressing a key must visibly
 	// do something, even for actions whose only result is a toast.
@@ -697,7 +710,7 @@ func (m *Model) viewPrompt(l layout) Block {
 		if focused {
 			title = "Prompt · plain text → AI · /commands still work · esc close"
 		}
-		placeholder = "ask about your cluster…   ·   :config to change provider/model"
+		placeholder = "ask about your cluster…   ·   /settings to change provider/model"
 	} else {
 		caret = sBg(th.Accent).Bold(true).Render(" ❯ ")
 		modePlain = "[ CMD ]"

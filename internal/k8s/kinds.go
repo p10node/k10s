@@ -1,6 +1,6 @@
 package k8s
 
-import "k10s/internal/domain"
+import "github.com/p10node/k10s/internal/domain"
 
 var podActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AShell, domain.APortFwd, domain.ATop, domain.AEdit, domain.ADelete}
 var wlActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AScale, domain.AEdit, domain.ADelete}
@@ -51,4 +51,11 @@ func findKind(key string) *domain.Kind {
 		}
 	}
 	return nil
+}
+
+// Kinds is the resource list the real backend serves, available without a
+// cluster connection. Startup uses it so the Resources pane is populated
+// while the connection is still being made.
+func Kinds() []domain.Kind {
+	return append([]domain.Kind(nil), builtinKinds...)
 }

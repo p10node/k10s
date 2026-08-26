@@ -18,7 +18,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // Client bundles every handle we need against one kubeconfig context.
@@ -142,4 +142,24 @@ func (c *Client) DefaultNamespace() string {
 		return ctx.Namespace
 	}
 	return "default"
+}
+
+// KubeContexts reads kubeconfig and nothing else: no client is built and no
+// request is made, so it answers instantly even when the cluster is
+// unreachable. Startup uses it to fill the context picker before (or
+// instead of) a successful connection.
+func KubeContexts(path string) (names []string, current string) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if path != "" {
+		rules.ExplicitPath = path
+	}
+	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	if err != nil {
+		return nil, ""
+	}
+	for name := range raw.Contexts {
+		names = append(names, name)
+	}
+	domain.SortNames(names)
+	return names, raw.CurrentContext
 }

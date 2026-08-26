@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"k10s/internal/theme"
+	"github.com/p10node/k10s/internal/theme"
 )
 
 // kindLoading reports whether the pane is waiting on its first batch of data
@@ -35,6 +35,18 @@ func (m *Model) loadingLines(inner int) []string {
 	return m.spinnerBlock(inner,
 		"loading "+strings.ToLower(m.curKind().Name)+"…",
 		"watch is being established · first list can take a moment")
+}
+
+// connectingLines renders the startup spinner, shown until the backend is
+// built. The hint names the way out, since an unreachable context is the
+// usual reason this takes long enough to read.
+func (m *Model) connectingLines(inner int) []string {
+	target := m.connName
+	if target == "" {
+		target = "the cluster"
+	}
+	return m.spinnerBlock(inner, "connecting to "+target+"…",
+		"kubeconfig · API server handshake — /context picks another one")
 }
 
 func (m *Model) spinnerBlock(inner int, label, hint string) []string {

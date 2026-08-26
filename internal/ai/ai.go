@@ -61,10 +61,10 @@ func (c Context) systemPrompt() string {
 // Ask sends prompt to the configured model and returns its reply.
 func Ask(ctx context.Context, cfg Config, cc Context, prompt string) (string, error) {
 	if cfg.APIKey == "" {
-		return "", fmt.Errorf("no API key set — :config to add one")
+		return "", fmt.Errorf("no API key set — /settings to add one")
 	}
 	if cfg.Model == "" {
-		return "", fmt.Errorf("no model set — :config to add one")
+		return "", fmt.Errorf("no model set — /settings to add one")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)

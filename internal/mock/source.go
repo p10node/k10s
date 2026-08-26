@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"k10s/internal/domain"
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // Source is the offline demo backend: it implements domain.Source entirely
@@ -75,7 +75,7 @@ func (s *Source) RowCount(kind, ns string) int {
 func (s *Source) ClusterInfo() domain.ClusterInfo {
 	return domain.ClusterInfo{
 		Context: contexts[s.ctxIdx],
-		Server:  "https://k8s.p10node.onl:6443",
+		Server:  "https://k8s.example.com:6443",
 		Version: clusterVersion,
 	}
 }

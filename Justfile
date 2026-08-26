@@ -11,7 +11,7 @@ commit := `git rev-parse --short HEAD 2>/dev/null || echo none`
 date := `date -u +%Y-%m-%d`
 
 # What -ldflags carries: the version stamp read by internal/version.
-stamp := "-X k10s/internal/version.Version=" + version + " -X k10s/internal/version.Commit=" + commit + " -X k10s/internal/version.Date=" + date
+stamp := "-X github.com/p10node/k10s/internal/version.Version=" + version + " -X github.com/p10node/k10s/internal/version.Commit=" + commit + " -X github.com/p10node/k10s/internal/version.Date=" + date
 
 # Platforms `just release` builds for.
 platforms := "darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64"
@@ -134,6 +134,27 @@ release:
 tag ver:
     git tag -a {{ver}} -m "k10s {{ver}}"
     git push origin {{ver}}
+
+# ---- demo -----------------------------------------------------------------
+
+# Keyboard only — vhs cannot record a mouse cursor, so the hero clip that
+# shows clicking has to be a real screen capture. See docs/build-in-public.md.
+
+# Record the reproducible demo GIF (needs charmbracelet/vhs + k10s on PATH).
+demo: install
+    vhs assets/demo.tape
+
+# ---- logo -----------------------------------------------------------------
+
+# Regenerate every logo SVG and re-export the PNGs. Needs python3 + rsvg-convert
+# (`brew install librsvg`). The SVGs are generated, never hand-edited.
+logo:
+    python3 assets/logo/generate.py
+    for s in 1024 512 256 128 64; do rsvg-convert -w $s assets/logo/mark.svg -o assets/logo/mark-$s.png; done
+    for s in 180 48 32 16; do rsvg-convert -w $s assets/logo/favicon.svg -o assets/logo/favicon-$s.png; done
+    rsvg-convert -w 904 assets/logo/wordmark-on-dark.svg -o assets/logo/wordmark-on-dark.png
+    rsvg-convert -w 904 -b '#ffffff' assets/logo/wordmark-on-light.svg -o assets/logo/wordmark-on-light.png
+    rsvg-convert -w 1280 assets/logo/social-preview.svg -o assets/logo/social-preview.png
 
 # ---- misc -----------------------------------------------------------------
 
