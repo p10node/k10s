@@ -20,6 +20,7 @@ import (
 	"k10s/internal/config"
 	"k10s/internal/domain"
 	"k10s/internal/theme"
+	"k10s/internal/update"
 )
 
 type focusPane int
@@ -200,6 +201,17 @@ type Model struct {
 	logName    string
 
 	rowMem map[string]int
+
+	// Self-update (see update.go). updRel is the newest release once a check
+	// has come back — nil until then, which is what /update uses to decide
+	// whether it needs to look first.
+	updRel      *update.Release
+	updDisabled bool
+	updRepo     string
+	updSkip     string
+	updLast     time.Time
+	updBusy     bool
+	relaunch    bool
 }
 
 // New builds the UI model against src (either a real k8s.Store or the
@@ -269,6 +281,7 @@ func (m *Model) loadConfig() {
 	if len(c.CLIs) > 0 {
 		m.clis = c.CLIs
 	}
+	m.applyUpdateConfig(c.Update)
 	m.onboarded = c.Onboarded
 	// First run (or a config predating the CLI setting): show the settings
 	// screen so the user picks a CLI name before anything else.
@@ -294,6 +307,7 @@ func (m *Model) saveConfig() {
 			Model:    m.cfg.model,
 			APIKey:   m.cfg.key,
 		},
+		Update: m.updateConfig(),
 	})
 	if err != nil {
 		m.toast = "config save failed: " + err.Error()
@@ -483,6 +497,11 @@ func (m *Model) Init() tea.Cmd {
 		m.initialCtx = ""
 		cmds = append(cmds, m.switchContextCmd(ctx))
 	}
+	// Nil unless the check is on and a day has passed, so most launches make
+	// no network call at all.
+	if c := m.autoCheckCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -596,6 +615,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = msg.toast
 		}
 		return m, nil
+
+	case updateCheckMsg:
+		return m, m.handleUpdateCheck(msg)
+
+	case updateAppliedMsg:
+		return m, m.handleUpdateApplied(msg)
 
 	case ctxSwitchMsg:
 		m.busy = false
@@ -1792,6 +1817,13 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 		m.openSettings()
 		m.closePrompt()
 		return nil
+	case "/update":
+		m.closePrompt()
+		return m.startUpdate(arg)
+	case "/version":
+		m.showText("version", versionReport(m))
+		m.closePrompt()
+		return nil
 	case ":mouse":
 		m.closePrompt()
 		return m.toggleMouse()
@@ -1944,6 +1976,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		case zone.Get("set:anthropic").InBounds(msg):
 			m.setProvider(1)
 			return nil
+		case zone.Get("set:updon").InBounds(msg):
+			m.setUpdateChecks(true)
+			return nil
+		case zone.Get("set:updoff").InBounds(msg):
+			m.setUpdateChecks(false)
+			return nil
 		}
 		for i := 0; i < setRows(); i++ {
 			if zone.Get(fmt.Sprintf("set:%d", i)).InBounds(msg) {
@@ -1982,6 +2020,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if zone.Get("close").InBounds(msg) {
 		m.mode = modeTable
 		return nil
+	}
+	if zone.Get("updbtn").InBounds(msg) {
+		return m.startUpdate("")
 	}
 	if zone.Get("nsbtn").InBounds(msg) {
 		m.showNamespaceChooser()

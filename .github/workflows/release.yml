@@ -1,0 +1,64 @@
+# Publishes a release when a version tag is pushed (`just tag v1.2.3`).
+#
+# The archive names and the checksums.txt format are not cosmetic: they are
+# what internal/update matches on and verifies against, so keep them in step
+# with the `release` recipe in the Justfile. internal/update's e2e test
+# installs a real `just release` build and is the check that they agree.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test
+        run: go test ./...
+
+      - name: build every platform
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%d)
+          STAMP="-X k10s/internal/version.Version=$VERSION -X k10s/internal/version.Commit=$COMMIT -X k10s/internal/version.Date=$DATE"
+          mkdir -p dist
+          for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+            os="${p%/*}"; arch="${p#*/}"
+            bin=k10s; [ "$os" = windows ] && bin=k10s.exe
+            echo "→ $os/$arch"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 \
+              go build -trimpath -ldflags="-s -w $STAMP" -o "dist/$bin" .
+            name="k10s_${VERSION}_${os}_${arch}"
+            if [ "$os" = windows ]; then
+              (cd dist && zip -q "$name.zip" "$bin" && rm "$bin")
+            else
+              (cd dist && tar czf "$name.tar.gz" "$bin" && rm "$bin")
+            fi
+          done
+          (cd dist && sha256sum k10s_* > checksums.txt)
+          ls -lh dist
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "k10s ${{ github.ref_name }}" \
+            --generate-notes \
+            dist/*

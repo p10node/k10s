@@ -144,14 +144,16 @@ level tokens are coloured.
 | Search palette | `ctrl+p`        | `↑↓` move · `enter` open · `esc` close                          |
 | Context picker | `/context`      | type to filter · `↑↓` · `enter` · `esc`                         |
 | Theme picker   | `/theme`        | `↑↓` previews live · `tab` Save · `enter` apply · `esc` cancels |
-| Settings       | `/settings`     | `↑↓` · `enter` select/edit · `tab` Save                         |
+| Settings       | `/settings`     | `↑↓` · `enter` select/edit or toggle · `←→` toggle · `tab` Save  |
+| Update confirm | `/update`       | `enter` install · `esc` cancel                                   |
 | Command popup  | type `/` or `:` | `↑↓` move · `enter` **runs it** · `tab` completes               |
 
 ## Mouse
 
 Click: resource rows, table rows, every action, `[ zoom ]`/`[ close ]`, the
-`ns …` and `theme …` buttons top-right, prompt row, mode tag, suggestion
-rows, palette and picker rows, modal buttons, provider radios.
+`ns …` and `theme …` buttons top-right, the `⇧ 1.4.0` update badge in the
+status bar, prompt row, mode tag, suggestion rows, palette and picker rows,
+modal buttons, provider radios, the update-check toggle.
 
 Actions light up under the pointer and **flash** when clicked, so a click is
 acknowledged even when the action only produces a toast.

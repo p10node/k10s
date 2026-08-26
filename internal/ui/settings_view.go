@@ -9,6 +9,7 @@ import (
 
 	"k10s/internal/ai"
 	"k10s/internal/config"
+	"k10s/internal/version"
 )
 
 // The single settings modal: CLI name and AI provider in one place, doubling
@@ -117,6 +118,34 @@ func (m *Model) overlaySettings(root Block) Block {
 		field(rowURL(), "base url", m.cfg.url, false),
 		field(rowModel(), "model", m.cfg.model, false),
 		field(rowKey(), "api key", m.cfg.key, true),
+		"",
+		s(th.Subtle).Render("  UPDATES")+s(th.Border).Render("  — /update installs on demand"),
+	)
+
+	// Update check toggle. Same shape as the provider radios, because it is
+	// the same kind of choice: two states, no typing.
+	ui := rowUpdate()
+	{
+		bg := rowBG(ui)
+		st := func(c lipgloss.Color) lipgloss.Style {
+			return lipgloss.NewStyle().Background(bg).Foreground(c)
+		}
+		radio := func(on bool, txt, id string) string {
+			mark, col := "○ ", th.Subtle
+			if on {
+				mark, col = "● ", th.Accent2
+			}
+			return zone.Mark(id, st(col).Render(mark+txt))
+		}
+		row := st(th.Accent).Render(lead(ui)) + st(th.Subtle).Render(fmt.Sprintf("%-9s", "check")) +
+			radio(!m.updDisabled, "daily", "set:updon") +
+			st(bg).Render("   ") +
+			radio(m.updDisabled, "off", "set:updoff")
+		body = append(body, zone.Mark(fmt.Sprintf("set:%d", ui), padBG(row, inner, bg)))
+	}
+
+	body = append(body,
+		s(th.Border).Render("  "+trunc("from "+m.updateClient().Repository()+" · running "+version.Current(), inner-3)),
 		"",
 		s(th.Border).Render(strings.Repeat("╌", inner)),
 	)

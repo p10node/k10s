@@ -95,3 +95,56 @@ func TestRoundTripPreservesValuesNeedingQuoting(t *testing.T) {
 		t.Errorf("AI.BaseURL = %q, want %q", got.AI.BaseURL, want.AI.BaseURL)
 	}
 }
+
+func TestUpdateSectionRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("K10S_CONFIG", path)
+
+	want := Update{Disabled: true, Repo: "forked/k10s", LastCheck: 1772064000, Skip: "1.5.0"}
+	if err := Save(Config{Update: want}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Update != want {
+		t.Errorf("Update = %+v, want %+v", got.Update, want)
+	}
+}
+
+func TestUpdateChecksAreEnabledByDefault(t *testing.T) {
+	t.Setenv("K10S_CONFIG", filepath.Join(t.TempDir(), "none.yaml"))
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// The field is spelled "Disabled" precisely so that a config file
+	// written before the updater existed still checks for updates.
+	if c.Update.Disabled {
+		t.Error("Update.Disabled = true for a fresh config, want the check enabled")
+	}
+}
+
+func TestNestedSectionsDoNotBleedIntoEachOther(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("K10S_CONFIG", path)
+
+	// "ai:" and "update:" both hold a nested block; a parser tracking only
+	// one section would file update's keys under ai, or drop them.
+	want := Config{
+		AI:     AI{Provider: "openai", Model: "gpt-5"},
+		Update: Update{Repo: "acme/k10s", Skip: "9.9.9"},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.AI != want.AI || got.Update != want.Update {
+		t.Errorf("got ai=%+v update=%+v, want ai=%+v update=%+v", got.AI, got.Update, want.AI, want.Update)
+	}
+}

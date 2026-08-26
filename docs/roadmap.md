@@ -12,6 +12,11 @@
 3. **Real AI** — `internal/ai` posts to the OpenAI-compatible or Anthropic
    endpoint per `/settings`, with cluster context injected into the prompt.
 4. **Config file** — see [config.md](config.md).
+5. **Self-update** — `internal/update` installs the newest GitHub release
+   over the running binary: checksum-verified, atomic rename, offer to
+   restart. A once-a-day startup check reports a newer version and nothing
+   else. `internal/version` carries the `-ldflags` stamp. See
+   [update.md](update.md).
 
 ### Performance
 
@@ -52,6 +57,15 @@ undo by accident.
 - **The palette's object search covers loaded kinds only.** Kinds not yet
   opened match by name. Searching their objects would mean watching the whole
   cluster — see [performance.md](performance.md).
+- **Updates are checksum-verified, not signature-verified.** `checksums.txt`
+  proves the download matches what the release published; it proves nothing
+  about who published it. Shipping a public key and checking a cosign or
+  minisign signature is the fix, and is worth doing before this is used
+  anywhere that matters.
+- **No releases published yet.** Updates come from `p10node/k10s`
+  (`update.DefaultRepo`), but this tree has no tags, so `/update` reports
+  "no published releases" until `just tag v0.1.0` pushes one. A fork can
+  point elsewhere with `K10S_UPDATE_REPO` / `update.repo`.
 - **The API key is stored as plain text** in `~/.k10s/config.yaml` (mode
   0600), masked only in the UI. Swapping in an OS keychain behind the same
   `AI.APIKey` field is the fix if that's not acceptable.

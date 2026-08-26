@@ -19,12 +19,17 @@ ai:
   base_url: "https://api.anthropic.com/v1"
   model: "claude-sonnet-5"
   api_key: "sk-ant-api03-••••••••••••7f2a"
+update:
+  disabled: false
+  repo: ""
+  last_check: 1772064000
+  skip: ""
 ```
 
 Written with a hand-rolled flat-YAML reader/writer (`render`/`parse` in
 `internal/config/config.go`) — the format is simple enough (top-level scalars
-plus one nested `ai:` block, all double-quoted) that pulling in a YAML
-library isn't worth it. Values round-trip through Go string quoting only;
+plus the nested `ai:` and `update:` blocks, all double-quoted) that pulling
+in a YAML library isn't worth it. Values round-trip through Go string quoting only;
 nothing fancier (lists, multi-line, anchors) is needed or supported.
 
 File permissions are `0600` since the file can hold an API key; the parent
@@ -45,6 +50,8 @@ immediately — there's no explicit "save" step and no dirty-flag debounce:
 | `/theme` picker → Save / `enter`                            | `theme`                                                                      |
 | `/settings` (or first-run onboarding) → Save                | `cli`, `onboarded`                                                           |
 | namespace picker (click `ns …` in the banner)               | `namespace`                                                                  |
+| `/settings` → toggle the update check                       | `update.disabled`                                                            |
+| a successful update check (startup or `/update`)            | `update.last_check`                                                          |
 
 A failed save (e.g. unwritable home directory) surfaces as a status-bar
 toast — `config save failed: …` — and never blocks the UI.
@@ -66,8 +73,18 @@ switch rather than blocking startup on it.
 separately from `cli` so that choosing the default value still counts as
 having answered.
 
+The `update:` block is read the same way, and the field is deliberately
+spelled `disabled` rather than `enabled`: absent means the check runs, so a
+config file written before the updater existed still gets it, and the zero
+value is the useful default. `last_check` throttles the startup check to once
+a day; `repo` overrides where releases come from; `skip` silences one version
+without turning the check off. Details in [update.md](update.md).
+
 ## Current limits
 
+- `last_check` is a plain timestamp with no jitter, so a fleet of machines
+  that all launched together will all re-check together. Harmless at this
+  scale; it is the thing to change if the anonymous rate limit ever bites.
 - The API key sits in the file as plain text (masked only in the UI). If
   that's not acceptable once this is wired to a real key, the fix is to swap
   `api_key` for a keychain reference (macOS Keychain / libsecret / Windows

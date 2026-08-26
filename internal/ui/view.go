@@ -752,7 +752,18 @@ func (m *Model) viewStatus() Block {
 	left := s(dotCol).Render(dot) + s(th.Fg).Render(trunc(m.toast, m.w/2))
 	hints := "tab panes · enter open · ctrl+p search · f find · z zoom · ctrl+s copy · q quit"
 	right := s(th.Subtle).Render(trunc(hints, m.w/2-2)) + s(th.Bg).Render(" ")
-	gapw := m.w - lipgloss.Width(dot) - lipgloss.Width(trunc(m.toast, m.w/2)) - lipgloss.Width(trunc(hints, m.w/2-2)) - 1
+	rightPlain := trunc(hints, m.w/2-2)
+
+	// A waiting release earns one clickable badge and nothing more: the
+	// toast that announced it scrolls away, and there is no other place that
+	// keeps saying so.
+	if badge := m.updateBadge(); badge != "" {
+		right = zone.Mark("updbtn", s(th.Accent2).Bold(true).Render(" "+badge+" ")) +
+			s(th.Border).Render("│ ") + right
+		rightPlain = " " + badge + " │ " + rightPlain
+	}
+
+	gapw := m.w - lipgloss.Width(dot) - lipgloss.Width(trunc(m.toast, m.w/2)) - lipgloss.Width(rightPlain) - 1
 	if gapw < 1 {
 		gapw = 1
 	}

@@ -4,3 +4,6 @@
 # coverage artifacts (`just cover`)
 coverage.out
 coverage.html
+
+# cross-compiled release archives (`just release`)
+/dist

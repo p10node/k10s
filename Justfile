@@ -2,6 +2,20 @@
 
 binary := "k10s"
 
+# Version stamped into the binary. Defaults to the nearest git tag, so a
+# local build reports the same thing a release would; `just build version=v1.2.3`
+# overrides it. An unstamped build reports "dev", which the self-updater
+# treats as older than every release.
+version := `git describe --tags --dirty 2>/dev/null || echo dev`
+commit := `git rev-parse --short HEAD 2>/dev/null || echo none`
+date := `date -u +%Y-%m-%d`
+
+# What -ldflags carries: the version stamp read by internal/version.
+stamp := "-X k10s/internal/version.Version=" + version + " -X k10s/internal/version.Commit=" + commit + " -X k10s/internal/version.Date=" + date
+
+# Platforms `just release` builds for.
+platforms := "darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64"
+
 _default:
     @just --list
 
@@ -9,11 +23,15 @@ _default:
 
 # Build the TUI binary.
 build:
-    go build -o {{binary}} .
+    go build -ldflags="{{stamp}}" -o {{binary}} .
 
 # Build a stripped binary (no debug info — roughly a third smaller).
 build-release:
-    go build -ldflags="-s -w" -o {{binary}} .
+    go build -ldflags="-s -w {{stamp}}" -o {{binary}} .
+
+# Print the version this tree would stamp.
+version:
+    @echo "{{version}} ({{commit}}) {{date}}"
 
 # Build and run the TUI. Needs a real terminal (TTY).
 run: build
@@ -83,12 +101,47 @@ check: fmt-check vet test
 tidy:
     go mod tidy
 
+# ---- release --------------------------------------------------------------
+
+# Cross-compile every platform into dist/, with a checksums.txt beside them.
+release:
+    #!/usr/bin/env bash
+    # Archive names are what internal/update matches on:
+    # k10s_<version>_<os>_<arch>.{tar.gz,zip}. Override the version with
+    # `just --set version v1.2.3 release`.
+    set -euo pipefail
+    rm -rf dist && mkdir -p dist
+    for p in {{platforms}}; do
+      os="${p%/*}"; arch="${p#*/}"
+      bin={{binary}}; [ "$os" = windows ] && bin={{binary}}.exe
+      echo "→ $os/$arch"
+      GOOS=$os GOARCH=$arch CGO_ENABLED=0 \
+        go build -trimpath -ldflags="-s -w {{stamp}}" -o "dist/$bin" .
+      name="{{binary}}_{{version}}_${os}_${arch}"
+      if [ "$os" = windows ]; then
+        (cd dist && zip -q "$name.zip" "$bin" && rm "$bin")
+      else
+        (cd dist && tar czf "$name.tar.gz" "$bin" && rm "$bin")
+      fi
+    done
+    # sha256sum on Linux, shasum on macOS — same format either way, and it
+    # is what internal/update's verifier parses. Globbing the archives only,
+    # so the manifest doesn't list itself.
+    (cd dist && (sha256sum {{binary}}_* 2>/dev/null || shasum -a 256 {{binary}}_*) > checksums.txt)
+    ls -lh dist
+
+# Tag this commit and push it; the release workflow publishes the build.
+tag ver:
+    git tag -a {{ver}} -m "k10s {{ver}}"
+    git push origin {{ver}}
+
 # ---- misc -----------------------------------------------------------------
 
-# Remove build and coverage artifacts.
+# Remove build, release and coverage artifacts.
 clean:
     rm -f {{binary}} coverage.out coverage.html
+    rm -rf dist
 
-# Install the binary into GOBIN (or ~/go/bin).
+# Install the binary into GOBIN (or ~/go/bin), version stamp included.
 install:
-    go install .
+    go install -ldflags="{{stamp}}" .

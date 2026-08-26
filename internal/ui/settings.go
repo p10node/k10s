@@ -12,9 +12,10 @@ import (
 )
 
 // One settings modal covering everything persisted to ~/.k10s/config.yaml:
-// the CLI name used in hints, and the AI provider details. They used to be
-// two separate dialogs (/settings and /config), which meant remembering
-// which one held what.
+// the CLI name used in hints, the AI provider details, and whether k10s
+// looks for a newer release at startup. The first two used to be separate
+// dialogs (/settings and /config), which meant remembering which one held
+// what.
 //
 // The same modal is the first-run onboarding, with a different title — a new
 // user sees exactly the screen they will later return to.
@@ -23,13 +24,14 @@ import (
 // work, so there is nothing to choose and a row of checkboxes only invited
 // the question "what happens if I untick these?". The dialog states the
 // fact instead, and offers one row for adding a name of your own.
-func setRows() int { return 5 } // custom name + provider + url + model + key
+func setRows() int { return 6 } // custom name + provider + url + model + key + update check
 
 func rowCustom() int   { return 0 }
 func rowProvider() int { return 1 }
 func rowURL() int      { return 2 }
 func rowModel() int    { return 3 }
 func rowKey() int      { return 4 }
+func rowUpdate() int   { return 5 }
 
 const setSaveRow = -1 // sentinel: focus is on Save
 
@@ -81,8 +83,11 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
 			m.setRow = clamp(m.setRow+1, 0, setRows()-1)
 		}
 	case "left", "right":
-		if m.setRow == rowProvider() {
+		switch m.setRow {
+		case rowProvider():
 			m.setProvider(1 - m.cfg.provider)
+		case rowUpdate():
+			m.setUpdateChecks(m.updDisabled)
 		}
 	case "enter":
 		return m.activateSettingRow()
@@ -102,6 +107,10 @@ func (m *Model) activateSettingRow() tea.Cmd {
 
 	case m.setRow == rowProvider():
 		m.setProvider(1 - m.cfg.provider)
+		return nil
+
+	case m.setRow == rowUpdate():
+		m.setUpdateChecks(m.updDisabled)
 		return nil
 
 	default:

@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"k10s/internal/domain"
+	"k10s/internal/update"
 )
 
 // IsAsyncMsg reports whether msg is one of this package's own async-result
@@ -14,7 +15,7 @@ import (
 // a self-perpetuating Cmd like textinput's cursor blink.
 func IsAsyncMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case textResultMsg, actionResultMsg, ctxSwitchMsg, logStartMsg, logOlderMsg, shellStartMsg, editFetchedMsg, editExitMsg, portForwardMsg:
+	case textResultMsg, actionResultMsg, ctxSwitchMsg, logStartMsg, logOlderMsg, shellStartMsg, editFetchedMsg, editExitMsg, portForwardMsg, updateCheckMsg, updateAppliedMsg:
 		return true
 	}
 	return false
@@ -106,4 +107,22 @@ type portForwardMsg struct {
 	key, addr string
 	stop      func()
 	err       error
+}
+
+// updateCheckMsg lands after asking GitHub for the newest release. auto
+// marks the once-a-day startup check, which reports nothing when there is
+// nothing to report — including its own failure, since being offline is not
+// an error the user asked about.
+type updateCheckMsg struct {
+	rel   *update.Release
+	newer bool
+	auto  bool
+	err   error
+}
+
+// updateAppliedMsg lands after the new binary has been swapped in.
+type updateAppliedMsg struct {
+	version string
+	path    string
+	err     error
 }

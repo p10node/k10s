@@ -5,11 +5,17 @@
 `just` (with no arguments) lists every recipe. The common ones:
 
 ```bash
-just build            # → ./k10s
+just build            # → ./k10s, version stamped from git describe
 just build-release    # → ./k10s, stripped (~a third smaller)
 just run              # build + run — needs a TTY
 just dev              # go run . without producing a binary
+just version          # print the version this tree would stamp
 ```
+
+`just build` passes the version stamp through `-ldflags`; `just dev` and a
+bare `go build` do not, so those report `dev`. That is deliberate — `dev`
+compares older than every release, so a source build can still exercise
+`/update`. See [update.md](update.md).
 
 Go 1.26+. k10s uses your current kubeconfig context, and falls back to the
 offline demo backend when no cluster is reachable, so it always starts.
@@ -41,6 +47,14 @@ Two things to know when writing `internal/k8s` tests:
 - Fake clientsets panic on unregistered list kinds. `countKind` recovers from
   panics for the same reason production does: a background sweep must never
   take down the TUI.
+
+`internal/update` has one test that is skipped by default: `RealDist`
+installs a real cross-compiled build, which is how the release naming and
+the asset matcher are kept in step.
+
+```bash
+just release && go test ./internal/update/ -run RealDist -v
+```
 
 Performance guards are listed in [performance.md](performance.md). They fail
 if the render path starts doing I/O again — treat a failure there as a real
@@ -104,3 +118,25 @@ and sibling runs instead, never nesting.
 
 `RowCount` must not format rows or start a watch — see
 [performance.md](performance.md).
+
+## Cutting a release
+
+```bash
+just tag v1.4.0        # tags, pushes, and the workflow publishes the build
+just release           # or build the same archives locally into dist/
+```
+
+`.github/workflows/release.yml` runs the tests, cross-compiles
+`darwin/{amd64,arm64}`, `linux/{amd64,arm64}` and `windows/amd64`, writes
+`checksums.txt`, and publishes everything with generated notes.
+
+The archive names (`k10s_<version>_<os>_<arch>.tar.gz`, `.zip` on Windows)
+and the `sha256sum`-format manifest are what the self-updater matches on and
+verifies against — changing either means changing `internal/update/assets.go`
+with it. `docs/update.md` has the details, and the `RealDist` test above is
+what catches a mismatch.
+
+Releases are looked for in `p10node/k10s` (`update.DefaultRepo` in
+`internal/update/update.go`). Until the first tag is pushed, `/update`
+reports that the repo has no published releases — that is the expected
+answer, not a failure.

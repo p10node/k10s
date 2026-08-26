@@ -14,6 +14,9 @@ commands, themes, mock data, dev workflow, roadmap.
 
 ```bash
 go run .                            # real TUI (TTY, mouse enabled)
+just build && ./k10s                # version-stamped binary
+k10s update                         # install the newest release over it
+k10s --version                      # which build is this
 go run ./cmd/shot 140 44 ""         # headless render to stdout
 go run ./cmd/shot 140 44 "j,j,d"    # replay keys before rendering
 ```
@@ -60,8 +63,8 @@ Two prefixes: **`/` does something**, **`:` narrows what's on screen**.
 Typing either shows only its own set, and `enter` runs the highlighted
 command straight away.
 
-`/ns` · `/context` · `/theme` · `/settings` (CLI name + AI provider) ·
-`/help`
+`/ns` · `/context` · `/theme` · `/settings` (CLI name + AI provider + update
+check) · `/update` · `/version` · `/help`
 
 `:search <term>` · `:filter <term>` · `:scale <n>` · `:mouse`
 
@@ -76,6 +79,8 @@ internal/mock/          offline demo backend implementing the same Source interf
 internal/ai/            OpenAI-compatible / Anthropic HTTP calls for AI mode
 internal/theme/         palettes (7 themes)
 internal/config/        ~/.k10s/config.yaml load/save
+internal/version/       the -ldflags build stamp
+internal/update/        self-update from GitHub releases
 internal/ui/block.go    Block primitives + Panel (border+title+tag)
 internal/ui/model.go    state, key/mouse handling, async action plumbing
 internal/ui/view.go     header / list / table / actions / prompt / modals
@@ -84,9 +89,19 @@ internal/ui/view.go     header / list / table / actions / prompt / modals
 Every Block is padded to exactly W display cells, so horizontal joins and
 modal overlays never drift — even with BubbleZone markers embedded.
 
+## Updating
+
+k10s replaces its own binary. `/update` (or `k10s update` outside the TUI)
+fetches the newest GitHub release, confirms, verifies the download against
+the release checksums, swaps it in with an atomic rename, and offers to
+restart into it. A check also runs once a day at startup and only speaks up
+when there is something newer — a toast plus a clickable `⇧ 1.4.0` badge.
+Turn it off in `/settings`. Details in [docs/update.md](docs/update.md).
+
 ## Config
 
-Theme, context, namespace and AI settings (provider/URL/model/key) persist to
+Theme, context, namespace, AI settings (provider/URL/model/key) and the
+update check persist to
 `~/.k10s/config.yaml` (override with `K10S_CONFIG=path`) — saved on every
 change, loaded on startup. Details in [docs/config.md](docs/config.md).
 
@@ -101,6 +116,9 @@ change, loaded on startup. Details in [docs/config.md](docs/config.md).
 3. ~~Real AI calls per `/settings`~~ — `internal/ai` calls the OpenAI-compatible
    or Anthropic endpoint with cluster/resource context injected.
 4. ~~Persist theme/pane/AI settings~~ — done, see [docs/config.md](docs/config.md).
+5. ~~Self-update~~ — `/update` installs the newest GitHub release over the
+   running binary, checksum-verified, with a once-a-day startup check. See
+   [docs/update.md](docs/update.md).
 
 ## Notes
 

@@ -10,6 +10,7 @@
 | [commands.md](commands.md)         | Prompt modes, slash commands, search palette, AI settings   |
 | [themes.md](themes.md)             | Theme list, picker, palette contract, adding a theme        |
 | [config.md](config.md)             | `~/.k10s/config.yaml` — what's saved, when, and how         |
+| [update.md](update.md)             | Self-update: version stamps, release matching, installing   |
 | [dev.md](dev.md)                   | Build, tests, headless renderer, width invariant            |
 | [roadmap.md](roadmap.md)           | What's done and what's left                                 |
 

@@ -11,6 +11,8 @@ internal/mock/          offline demo backend, same interface, no network
 internal/ai/            OpenAI-compatible / Anthropic HTTP calls
 internal/theme/         Theme struct + 7 palettes
 internal/config/        ~/.k10s/config.yaml load/save
+internal/version/       the -ldflags build stamp (version, commit, date)
+internal/update/        self-update: GitHub releases, checksums, atomic swap
 internal/ui/
   block.go              Block primitive, Panel chrome
   model.go              Model state, Update: key/mouse dispatch, async commands
@@ -18,6 +20,7 @@ internal/ui/
   actions.go            the action table (id, hotkey, label, risky)
   commands.go           slash commands + /help text
   msgs.go               async result messages
+  update.go             /update + /version: the check, the confirm, the install
   pickers.go/_view.go   onboarding + theme picker
   palette.go/_view.go   global search palette, namespace picker
   nspicker.go           namespace picker logic

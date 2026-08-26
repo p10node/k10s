@@ -24,7 +24,9 @@ var clusterCommands = []SlashCommand{
 	{"/ns", "", "choose a namespace"},
 	{"/context", "", "choose a kube context — reconnects"},
 	{"/theme", "", "theme picker with live preview"},
-	{"/settings", "", "CLI name and AI provider settings"},
+	{"/settings", "", "CLI name, AI provider, update check"},
+	{"/update", "[skip]", "check for a newer k10s and install it"},
+	{"/version", "", "which build is running, and what the last check found"},
 	{"/help", "", "keybindings and commands"},
 }
 
@@ -136,7 +138,17 @@ func Help() string {
     /ns                 choose a namespace (list opens in the main panel)
     /context            choose a kube context — reconnects
     /theme              theme picker, previews live (tab → Save, esc cancels)
-    /settings           CLI name + AI provider, all in one dialog
+    /settings           CLI name + AI provider + update check, in one dialog
+    /update             check GitHub for a newer k10s and install it over
+                        this binary. Confirms first, verifies the download
+                        against the release checksums, then offers to restart
+                        into it. The check also runs once a day at startup
+                        and only speaks up when there is something newer —
+                        turn it off in /settings.
+    /update skip        stop mentioning the release the last check found,
+                        without turning the check off
+    /version            which build this is, where updates come from, and
+                        what the last check found
     /help               this screen
 
     :search <term>      filter the resource list (left pane)

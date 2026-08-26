@@ -39,7 +39,9 @@ so the argument can be typed. `tab` always completes rather than runs.
 | `/ns`       |          | choose a namespace — opens the Namespaces table              |
 | `/context`  |          | choose a kube context — opens a picker; switching reconnects |
 | `/theme`    |          | theme picker with live preview                               |
-| `/settings` |          | CLI name **and** AI provider, in one dialog                  |
+| `/settings` |          | CLI name, AI provider **and** the update check, in one dialog |
+| `/update`   | `[skip]` | check GitHub for a newer k10s and install it over this binary |
+| `/version`  |          | which build is running, and what the last check found        |
 | `/scale`    | `<n>`    | scale the selected deployment/statefulset                    |
 | `/help`     |          | keybindings + commands text view                             |
 | `:search`   | `<term>` | filter the resource list (left pane, by kind)                |
@@ -84,6 +86,27 @@ k10s asks once, on first run, which command you type for Kubernetes —
 It is cosmetic: k10s talks to the API directly and never executes it.
 Reopen the picker any time with `/settings`; it is stored as `cli:` in
 [config.md](config.md).
+
+## Self-update (`/update`)
+
+`/update` asks GitHub for the newest release, confirms — same modal as
+delete and drain, since it replaces the binary you are running — verifies
+the download against the release checksums, installs it, then offers to
+restart into it. `/version` reports what is running and where updates come
+from without touching the network.
+
+The same check also runs once a day at startup and only speaks up when there
+is something newer, as a toast plus a clickable `⇧ 1.4.0` badge in the status
+bar. Three levels of "not now":
+
+| | |
+|---|---|
+| `esc` on the dialog | not this time |
+| `/update skip` | stop mentioning *this* release; the check stays on |
+| `/settings` → `UPDATES` → `off` | stop checking at all; `/update` still works |
+
+Outside the TUI: `k10s update` and `k10s --version`. Full behaviour in
+[update.md](update.md).
 
 ## AI settings (`/settings`)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +14,22 @@ type AI struct {
 	BaseURL  string `yaml:"base_url"`
 	Model    string `yaml:"model"`
 	APIKey   string `yaml:"api_key"`
+}
+
+// Update controls the self-updater (internal/update).
+type Update struct {
+	// Disabled turns off the check that runs at startup. Absent means
+	// enabled: the opposite default would keep the feature invisible until
+	// somebody went looking for the switch.
+	Disabled bool `yaml:"disabled"`
+	// Repo overrides where releases are fetched from ("owner/name"), so a
+	// fork updates from itself without being recompiled.
+	Repo string `yaml:"repo"`
+	// LastCheck is the unix time of the last successful check. The startup
+	// check is throttled against it — see update.CheckInterval.
+	LastCheck int64 `yaml:"last_check"`
+	// Skip is a version the user asked not to be reminded about again.
+	Skip string `yaml:"skip"`
 }
 
 type Config struct {
@@ -28,8 +45,9 @@ type Config struct {
 	CLIs []string `yaml:"clis"`
 	// Onboarded records that the first-run setup has been completed, so it
 	// isn't shown again even if every other value is left at its default.
-	Onboarded bool `yaml:"onboarded"`
-	AI        AI   `yaml:"ai"`
+	Onboarded bool   `yaml:"onboarded"`
+	AI        AI     `yaml:"ai"`
+	Update    Update `yaml:"update"`
 }
 
 // DefaultCLI is used until the user picks one during onboarding.
@@ -99,11 +117,18 @@ func render(c Config) string {
 	fmt.Fprintf(&b, "  base_url: %q\n", c.AI.BaseURL)
 	fmt.Fprintf(&b, "  model: %q\n", c.AI.Model)
 	fmt.Fprintf(&b, "  api_key: %q\n", c.AI.APIKey)
+	b.WriteString("update:\n")
+	fmt.Fprintf(&b, "  disabled: %v\n", c.Update.Disabled)
+	fmt.Fprintf(&b, "  repo: %q\n", c.Update.Repo)
+	fmt.Fprintf(&b, "  last_check: %d\n", c.Update.LastCheck)
+	fmt.Fprintf(&b, "  skip: %q\n", c.Update.Skip)
 	return b.String()
 }
 
 func parse(s string, c *Config) {
-	inAI := false
+	// Indented lines belong to whichever top-level key was seen last, so
+	// "ai:" and "update:" can both hold nested keys of their own.
+	section := ""
 	for _, line := range strings.Split(s, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
 			continue
@@ -119,7 +144,7 @@ func parse(s string, c *Config) {
 			val = v
 		}
 		if !indented {
-			inAI = key == "ai"
+			section = key
 		}
 		switch {
 		case !indented && key == "theme":
@@ -139,7 +164,7 @@ func parse(s string, c *Config) {
 			}
 		case !indented && key == "onboarded":
 			c.Onboarded = val == "true"
-		case indented && inAI:
+		case indented && section == "ai":
 			switch key {
 			case "provider":
 				c.AI.Provider = val
@@ -149,6 +174,20 @@ func parse(s string, c *Config) {
 				c.AI.Model = val
 			case "api_key":
 				c.AI.APIKey = val
+			}
+		case indented && section == "update":
+			switch key {
+			case "disabled":
+				c.Update.Disabled = val == "true"
+			case "repo":
+				c.Update.Repo = val
+			case "last_check":
+				n, err := strconv.ParseInt(val, 10, 64)
+				if err == nil {
+					c.Update.LastCheck = n
+				}
+			case "skip":
+				c.Update.Skip = val
 			}
 		}
 	}
