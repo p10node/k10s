@@ -1,0 +1,6 @@
+# compiled binary (built via `just build`)
+/k10s
+
+# coverage artifacts (`just cover`)
+coverage.out
+coverage.html

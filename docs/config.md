@@ -7,10 +7,13 @@ a real user's file).
 ## What's saved
 
 ```yaml
-# k10s configuration — edited in-app via /config, T, /ns, /context
+# k10s configuration — edited in-app via /config, /settings, T, /ns, /context
 theme: "dracula"
-context: "teleport.internal.s3.p10node.onl-S3"
+context: "prod-eks-apse1"
 namespace: "default"
+cli: "k"
+clis: "kubectl,k8s,k"
+onboarded: true
 ai:
   provider: "anthropic"
   base_url: "https://api.anthropic.com/v1"
@@ -32,13 +35,16 @@ directory `~/.k10s` is created with `0755` on first save.
 Every mutation that should survive a restart calls `Model.saveConfig()`
 immediately — there's no explicit "save" step and no dirty-flag debounce:
 
-| Trigger | Field(s) saved |
-|---|---|
-| `T` / `ctrl+t` / click theme label | `theme` |
-| `/context [name]` | `context` |
-| `/ns <name>` | `namespace` |
-| `/config` → toggle provider (←→/click/enter) | `ai.provider`, `ai.base_url`, `ai.model` (reset to that provider's defaults) |
-| `/config` → edit Base URL / Model / API Key, then `enter` | the edited field |
+| Trigger                                                     | Field(s) saved                                                               |
+|-------------------------------------------------------------|------------------------------------------------------------------------------|
+| `T` / `ctrl+t` / click theme label                          | `theme`                                                                      |
+| `/context [name]`                                           | `context`                                                                    |
+| `/ns <name>`                                                | `namespace`                                                                  |
+| `/settings` → toggle provider (←→/click/enter)              | `ai.provider`, `ai.base_url`, `ai.model` (reset to that provider's defaults) |
+| `/settings` → edit Base URL / Model / API Key, then `enter` | the edited field                                                             |
+| `/theme` picker → Save / `enter`                            | `theme`                                                                      |
+| `/settings` (or first-run onboarding) → Save                | `cli`, `onboarded`                                                           |
+| namespace picker (click `ns …` in the banner)               | `namespace`                                                                  |
 
 A failed save (e.g. unwritable home directory) surfaces as a status-bar
 toast — `config save failed: …` — and never blocks the UI.
@@ -46,20 +52,23 @@ toast — `config save failed: …` — and never blocks the UI.
 ## Load on startup
 
 `New()` calls `loadConfig()` once: matches `theme` against
-`theme.Themes[i].Name`, `context` against the known context list, applies
-`namespace` directly, and fills the AI config (provider/url/model/key) from
-whatever is present. A missing file is not an error — the built-in defaults
-(tokyo-night, first context, `default` namespace, Anthropic preset) apply.
+`theme.Themes[i].Name`, applies `namespace` and `cli` directly, and fills the
+AI config (provider/url/model/key) from whatever is present. A missing file
+is not an error — the built-in defaults (tokyo-night, the kubeconfig's own
+namespace, `kubectl`, Anthropic preset) apply.
 
-## Current limits (mock stage)
+`context` is handled differently: it names a kubeconfig context, and
+switching to it means rebuilding the whole client. If the saved context
+differs from the one already connected, `Init()` issues an async context
+switch rather than blocking startup on it.
 
-- `context` / `namespace` / provider presets are matched against
-  `internal/mock` data (`mock.Contexts`, `mock.AIProviders`) since there's no
-  real cluster yet. Once client-go lands, `/context` will read real
-  kubeconfig contexts instead of the fixed mock list — the config file
-  format doesn't need to change for that.
+`onboarded` is what suppresses the first-run CLI picker. It is tracked
+separately from `cli` so that choosing the default value still counts as
+having answered.
+
+## Current limits
+
 - The API key sits in the file as plain text (masked only in the UI). If
   that's not acceptable once this is wired to a real key, the fix is to swap
   `api_key` for a keychain reference (macOS Keychain / libsecret / Windows
-  Credential Manager) behind the same `AI.APIKey` field — see roadmap.md
-  decision history.
+  Credential Manager) behind the same `AI.APIKey` field.

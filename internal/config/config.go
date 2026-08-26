@@ -19,8 +19,24 @@ type Config struct {
 	Theme     string `yaml:"theme"`
 	Context   string `yaml:"context"`
 	Namespace string `yaml:"namespace"`
-	AI        AI     `yaml:"ai"`
+	// CLI is the command name shown in copyable hints and command echoes —
+	// "kubectl", "k8s", "k", or anything the user prefers.
+	CLI string `yaml:"cli"`
+	// CLIs is every name k10s should recognise when you type a command at
+	// the prompt. All three presets are enabled by default, because people
+	// alias them interchangeably.
+	CLIs []string `yaml:"clis"`
+	// Onboarded records that the first-run setup has been completed, so it
+	// isn't shown again even if every other value is left at its default.
+	Onboarded bool `yaml:"onboarded"`
+	AI        AI   `yaml:"ai"`
 }
+
+// DefaultCLI is used until the user picks one during onboarding.
+const DefaultCLI = "kubectl"
+
+// CLIPresets are the choices offered by onboarding and the settings modal.
+var CLIPresets = []string{"kubectl", "k8s", "k"}
 
 // Path returns the config file location: $K10S_CONFIG if set,
 // otherwise ~/.k10s/config.yaml.
@@ -75,6 +91,9 @@ func render(c Config) string {
 	fmt.Fprintf(&b, "theme: %q\n", c.Theme)
 	fmt.Fprintf(&b, "context: %q\n", c.Context)
 	fmt.Fprintf(&b, "namespace: %q\n", c.Namespace)
+	fmt.Fprintf(&b, "cli: %q\n", c.CLI)
+	fmt.Fprintf(&b, "clis: %q\n", strings.Join(c.CLIs, ","))
+	fmt.Fprintf(&b, "onboarded: %v\n", c.Onboarded)
 	b.WriteString("ai:\n")
 	fmt.Fprintf(&b, "  provider: %q\n", c.AI.Provider)
 	fmt.Fprintf(&b, "  base_url: %q\n", c.AI.BaseURL)
@@ -109,6 +128,17 @@ func parse(s string, c *Config) {
 			c.Context = val
 		case !indented && key == "namespace":
 			c.Namespace = val
+		case !indented && key == "cli":
+			c.CLI = val
+		case !indented && key == "clis":
+			c.CLIs = nil
+			for _, p := range strings.Split(val, ",") {
+				if p = strings.TrimSpace(p); p != "" {
+					c.CLIs = append(c.CLIs, p)
+				}
+			}
+		case !indented && key == "onboarded":
+			c.Onboarded = val == "true"
 		case indented && inAI:
 			switch key {
 			case "provider":

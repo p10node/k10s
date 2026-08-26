@@ -2,33 +2,77 @@
 
 ## Build & run
 
+`just` (with no arguments) lists every recipe. The common ones:
+
 ```bash
-go build ./...          # go 1.24+ (module pins bubbletea v1.3, lipgloss v1.1)
-go run .                # real TUI — needs a TTY; alt screen + mouse enabled
-go vet ./...
+just build            # → ./k10s
+just build-release    # → ./k10s, stripped (~a third smaller)
+just run              # build + run — needs a TTY
+just dev              # go run . without producing a binary
 ```
 
-Note: bubblezone is pinned to `v1.0.0` (proxy-resolvable; this machine's git
-rewrites github https → ssh, so pseudo-versions that bypass the proxy fail).
+Go 1.26+. k10s uses your current kubeconfig context, and falls back to the
+offline demo backend when no cluster is reachable, so it always starts.
+
+## Tests
+
+```bash
+just check       # fmt-check + vet + test — run this before committing
+just test        # go test ./...
+just test-v      # verbose, per test case
+just test-one X  # go test -run X -v
+just test-race   # race detector
+just cover       # coverage summary + coverage.html
+just test-perf   # only the performance regression guards
+just bench       # the render hot-path benchmarks
+```
+
+The live backend is tested against **fake clientsets**
+(`k8s.io/client-go/kubernetes/fake` and friends), not a real cluster, so the
+whole suite runs offline. `newTestStore` builds a `Store` through the same
+constructor production uses, with fakes swapped in.
+
+Two things to know when writing `internal/k8s` tests:
+
+- Informers are lazy, so a test that asserts on rows must call
+  `syncKinds(t, s, kPods, …)` first — it opens those kinds and waits for the
+  initial list. Production code never waits like that; the UI repaints as
+  caches fill.
+- Fake clientsets panic on unregistered list kinds. `countKind` recovers from
+  panics for the same reason production does: a background sweep must never
+  take down the TUI.
+
+Performance guards are listed in [performance.md](performance.md). They fail
+if the render path starts doing I/O again — treat a failure there as a real
+regression, not a flaky test.
 
 ## Headless renderer — `cmd/shot`
 
 Renders one frame without a TTY, with truecolor forced
-(`lipgloss.SetColorProfile(termenv.TrueColor)`):
+(`lipgloss.SetColorProfile(termenv.TrueColor)`). It is always mock-backed, so
+layout work never needs a cluster:
 
 ```bash
-go run ./cmd/shot <width> <height> "<keys>"
-go run ./cmd/shot 140 44 ""                    # main screen
-go run ./cmd/shot 140 44 "j,j,d"               # 2×down, describe
-go run ./cmd/shot 140 44 "left,sec"            # focus list, type "sec"
-go run ./cmd/shot 140 44 ":,/config,enter"     # AI settings modal
-go run ./cmd/shot 140 44 "ctrl+a,hello,enter"  # AI answer view
+just shot                            # 140x44, main screen
+just shot 140 44 "j,j,d"             # 2×down, describe
+just shot 140 44 "left,sec"          # focus list, type "sec"
+just shot 140 44 ":,/config,enter"   # AI settings modal
+just shot 140 44 "ctrl+p,web"        # search palette
+go run ./cmd/shot 120 40 "esc,f,web" # or call it directly
 ```
 
 Key tokens are comma-separated. Multi-char tokens are sent as one rune batch
 (handy for typing into search/prompt). Special names: `tab enter esc up down
-left right pgup pgdown ctrl+a backspace` (see `special` map in
-`cmd/shot/main.go`).
+left right pgup pgdown ctrl+a ctrl+s ctrl+p shift+tab backspace` (see the
+`special` map in `cmd/shot/main.go`).
+
+Because real actions are async `tea.Cmd`s, `shot` runs the returned command
+and feeds the result back (`drain`), following the chain only while the
+message is one of the UI's own async messages (`ui.IsAsyncMsg`) — otherwise a
+self-perpetuating command like the cursor blink would loop forever.
+
+**Note:** the first run shows the onboarding overlay. Prefix key sequences
+with `esc` to dismiss it, as the examples above do.
 
 ## Width invariant
 
@@ -47,9 +91,16 @@ If a line goes long, the usual culprit is a style nested inside another
 style's `Render` (the inner reset drops the outer background) — use `padBG`
 and sibling runs instead, never nesting.
 
-## Review page
+## Adding a resource kind
 
-The "k10s" artifact (mock-v2) is generated from shot captures: ANSI →
-HTML spans, one `<figure>` per scene, all 7 themes. Regenerate by re-running
-the captures and the converter (scratchpad scripts `ans2html.py`,
-`build_page.py`) and republishing the same file path.
+1. Add it to `builtinKinds` in `internal/k8s/kinds.go` (key, columns,
+   allowed actions).
+2. Register its informer in `Store.register` and add a lazy accessor in
+   `listers.go`.
+3. Add a `…Rows()` formatter in `rows.go` and wire it into `Rows` and
+   `RowCount`.
+4. Map it in `gvrFor` (for delete/YAML) and `kindToGK` (for describe).
+5. Mirror it in `internal/mock/data.go` so the demo and tests cover it.
+
+`RowCount` must not format rows or start a watch — see
+[performance.md](performance.md).

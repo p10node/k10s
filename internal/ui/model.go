@@ -1,33 +1,65 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/hinshun/vt10x"
+
+	"k10s/internal/ai"
 	"k10s/internal/config"
-	"k10s/internal/mock"
+	"k10s/internal/domain"
 	"k10s/internal/theme"
 )
 
 type focusPane int
 
+// Tab cycles Resources → Main → Command box, in layout order. The Actions
+// pane stays out of it: every action already has a hotkey and a clickable
+// row, so a stop there would be a keystroke that leads nowhere.
 const (
-	focusList focusPane = iota
-	focusMain
-	focusActions
+	focusMain focusPane = iota
 	focusPrompt
 	focusMainSearch // typing into the table's own row-search box
+	focusList
+
+	// Never focused; retained so the mouse code can name the pane.
+	focusActions
 )
+
+// tabOrder is the cycle tab walks. Keeping it as data means forward and
+// backward can't drift apart.
+var tabOrder = []focusPane{focusList, focusMain, focusPrompt}
+
+// nextFocus returns the pane tab (dir=+1) or shift+tab (dir=-1) moves to.
+func nextFocus(cur focusPane, dir int) focusPane {
+	at := 0
+	for i, f := range tabOrder {
+		if f == cur {
+			at = i
+		}
+	}
+	return tabOrder[(at+dir+len(tabOrder))%len(tabOrder)]
+}
 
 type mainMode int
 
 const (
 	modeTable mainMode = iota
 	modeText
+	modeLogs
+	modeContexts
+	modeShell
 )
 
 type promptMode int
@@ -41,11 +73,11 @@ type confirmState struct {
 	title   string
 	message []string
 	danger  bool
-	onOK    func(*Model)
+	onOK    func(*Model) tea.Cmd
 }
 
 type aiConfig struct {
-	provider int // index into mock.AIProviders
+	provider int // index into ai.Providers
 	url      string
 	model    string
 	key      string
@@ -53,6 +85,9 @@ type aiConfig struct {
 
 type Model struct {
 	w, h int
+
+	src       domain.Source
+	namespace string
 
 	themeIdx int
 	focus    focusPane
@@ -75,32 +110,121 @@ type Model struct {
 	input textinput.Model
 	toast string
 
-	cfg        aiConfig
-	cfgOpen    bool
-	cfgRow     int
-	cfgEditing bool
+	cfg aiConfig
 
-	ctxIdx int
+	// cli is the command name echoed in hints ("kubectl" / "k" / …), and
+	// clis is every name recognised when you type a command at the prompt.
+	// All three presets are enabled by default because people alias them
+	// interchangeably.
+	cli  string
+	clis []string
+
+	// One settings modal: CLI name + AI provider. Also serves as first-run
+	// onboarding, which is what `onboarded` distinguishes.
+	setOpen    bool
+	setRow     int
+	setEditing bool
+	onboarded  bool
+
+	// themePicker: live-previewing theme chooser opened by /theme.
+	themeOpen bool
+	themeRow  int
+	themeOrig int  // restored if the picker is cancelled
+	themeSave bool // focus is on the Save button
+
+	// sugIdx is the highlighted entry in the slash-command popup.
+	sugIdx int
+
+	// palette: the global "search everything" box (ctrl+p).
+	palOpen bool
+	palIdx  int
+
+	// context picker, opened by /context.
+	ctxOpen   bool
+	ctxIdx    int
+	ctxFilter string
+
+	// Action-pane feedback: which action the pointer is over, and which one
+	// was just clicked (briefly lit so the click is visible).
+	hoverAct string
+	flashAct string
+	flashGen int
+
+	// Which kind to return to after the namespace chooser — you usually
+	// want the view you left, not pods.
+	nsReturnKind string
+
+	// Double-click detection: bubbletea reports individual presses, so the
+	// pair has to be recognised here.
+	lastClickRow int
+	lastClickAt  time.Time
+
+	// An interactive shell rendered inside the main panel: the live exec
+	// stream plus the terminal emulator its output is fed into.
+	shellSess domain.ShellSession
+	shellTerm vt10x.Terminal
+	shellGen  int
+	shellName string
+
+	// busy marks an action whose result hasn't arrived yet, so the main
+	// panel can say so instead of looking like nothing happened.
+	busy      bool
+	busyLabel string
+
+	// anim advances on every repaint tick and drives the loading spinner.
+	anim int
+
+	// promptZoom grows the command box to half the screen so a long
+	// command or AI prompt is readable while typing it.
+	promptZoom bool
+
+	// mouseOff disables mouse capture so the terminal's own selection (and
+	// therefore copy) works.
+	mouseOff bool
+
+	initialCtx string
+	portFwds   map[string]func()
+	logStop    func()
+	logCh      <-chan string
+	logGen     int
+
+	// Log viewer state. logScroll counts display rows hidden *below* the
+	// view, so 0 means pinned to the newest line.
+	logScroll  int
+	logFollow  bool
+	logMore    bool // older entries remain on the server
+	logLoading bool // an older-page request is in flight
+	logTail    int  // how many lines have been requested so far
+	logKind    string
+	logNS      string
+	logName    string
 
 	rowMem map[string]int
 }
 
-func New() *Model {
+// New builds the UI model against src (either a real k8s.Store or the
+// offline mock.Source — the UI has no idea which).
+func New(src domain.Source) *Model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.CharLimit = 512
 
 	m := &Model{
-		themeIdx: 0,
-		focus:    focusMain,
-		input:    ti,
-		rowMem:   map[string]int{},
-		toast:    "mock mode — not connected to a real cluster",
+		src:       src,
+		namespace: src.DefaultNamespace(),
+		themeIdx:  0,
+		focus:     focusMain,
+		input:     ti,
+		rowMem:    map[string]int{},
+		portFwds:  map[string]func(){},
+		cli:       config.DefaultCLI,
+		clis:      append([]string(nil), config.CLIPresets...),
+		toast:     "connected to " + src.ClusterInfo().Context,
 		cfg: aiConfig{
 			provider: 1,
-			url:      mock.AIProviders[1].URL,
-			model:    mock.AIProviders[1].Model,
-			key:      "sk-ant-api03-••••••••••••7f2a",
+			url:      ai.Providers[1].URL,
+			model:    ai.Providers[1].Model,
+			key:      "",
 		},
 	}
 	m.loadConfig()
@@ -121,16 +245,11 @@ func (m *Model) loadConfig() {
 			}
 		}
 	}
-	if c.Context != "" {
-		for i, ctx := range mock.Contexts {
-			if ctx == c.Context {
-				m.ctxIdx = i
-				mock.Cluster.Context = ctx
-			}
-		}
+	if c.Context != "" && c.Context != m.src.ClusterInfo().Context {
+		m.initialCtx = c.Context
 	}
 	if c.Namespace != "" {
-		mock.Cluster.Namespace = c.Namespace
+		m.namespace = c.Namespace
 	}
 	if c.AI.Provider == "openai" {
 		m.cfg.provider = 0
@@ -144,6 +263,18 @@ func (m *Model) loadConfig() {
 	if c.AI.APIKey != "" {
 		m.cfg.key = c.AI.APIKey
 	}
+	if c.CLI != "" {
+		m.cli = c.CLI
+	}
+	if len(c.CLIs) > 0 {
+		m.clis = c.CLIs
+	}
+	m.onboarded = c.Onboarded
+	// First run (or a config predating the CLI setting): show the settings
+	// screen so the user picks a CLI name before anything else.
+	if !c.Onboarded {
+		m.openSettings()
+	}
 }
 
 // saveConfig persists the current settings; failures surface as a toast but
@@ -152,8 +283,11 @@ func (m *Model) saveConfig() {
 	providers := []string{"openai", "anthropic"}
 	err := config.Save(config.Config{
 		Theme:     m.th().Name,
-		Context:   mock.Cluster.Context,
-		Namespace: mock.Cluster.Namespace,
+		Context:   m.src.ClusterInfo().Context,
+		Namespace: m.namespace,
+		CLI:       m.cli,
+		CLIs:      m.clis,
+		Onboarded: m.onboarded,
 		AI: config.AI{
 			Provider: providers[m.cfg.provider],
 			BaseURL:  m.cfg.url,
@@ -168,13 +302,25 @@ func (m *Model) saveConfig() {
 
 func (m *Model) th() theme.Theme { return theme.Themes[m.themeIdx] }
 
-func (m *Model) res() mock.Resource { return mock.Resources[m.resIdx] }
+func (m *Model) kinds() []domain.Kind { return m.src.Kinds() }
 
-// filtered returns resource indices matching the search box.
+// curKind (aliased as res for brevity at call sites) returns the currently
+// selected kind, by resIdx into the full, unfiltered kind list.
+func (m *Model) curKind() domain.Kind {
+	ks := m.kinds()
+	if m.resIdx < 0 || m.resIdx >= len(ks) {
+		return domain.Kind{}
+	}
+	return ks[m.resIdx]
+}
+
+func (m *Model) res() domain.Kind { return m.curKind() }
+
+// filtered returns kind indices matching the search box.
 func (m *Model) filtered() []int {
 	q := strings.ToLower(m.search)
 	var out []int
-	for i, r := range mock.Resources {
+	for i, r := range m.kinds() {
 		if q == "" || strings.Contains(strings.ToLower(r.Name), q) ||
 			strings.Contains(strings.ToLower(r.Short), q) ||
 			strings.Contains(strings.ToLower(r.Group), q) {
@@ -185,22 +331,88 @@ func (m *Model) filtered() []int {
 }
 
 // tableData returns the columns and rows for the currently selected
-// resource, after namespace filtering (mock.Visible) and the main-panel row
-// search (m.rowSearch). Every place that reads the table — selection bounds,
-// rendering, click targets — goes through this so they never disagree about
-// what's currently showing.
+// resource, after namespace filtering and the main-panel row search
+// (m.rowSearch). Every place that reads the table — selection bounds,
+// rendering, click targets — goes through this so they never disagree
+// about what's currently showing.
 func (m *Model) tableData() ([]string, [][]string) {
-	cols, rows := mock.Visible(m.res(), mock.Cluster.Namespace)
+	cols, rows := m.src.Rows(m.curKind().Key, m.namespace)
+
+	// The Namespaces table doubles as the namespace switcher, so "all" leads
+	// it as a first-class choice. It is synthesized here rather than in a
+	// backend because it is not a namespace object — it is a view over all
+	// of them. Doing it in tableData keeps rendering, selection and click
+	// targets working from one definition.
+	if m.curKind().Key == "namespaces" {
+		rows = append([][]string{allNamespacesRow(cols)}, rows...)
+	}
+
 	if m.rowSearch != "" {
 		rows = filterRows(rows, m.rowSearch)
 	}
 	return cols, rows
 }
 
+// showNamespaceChooser opens the Namespaces table in the main panel — the
+// one route for changing namespace, whether you click the header button or
+// type /ns. Enter on a row switches to it (see openSelected).
+func (m *Model) showNamespaceChooser() {
+	// Remember what the user was looking at: after picking a namespace they
+	// almost always want the same view, not pods.
+	if k := m.curKind().Key; k != "namespaces" {
+		m.nsReturnKind = k
+	}
+	m.jumpToResource("namespaces")
+	m.toast = "pick a namespace · enter switches and returns to " + m.nsReturnLabel()
+}
+
+// nsReturnLabel names the kind the chooser will go back to.
+func (m *Model) nsReturnLabel() string {
+	for _, k := range m.kinds() {
+		if k.Key == m.nsReturnKind {
+			return strings.ToLower(k.Name)
+		}
+	}
+	return "pods"
+}
+
+// applyNamespace switches namespace and resets the table position, since the
+// row set changes completely.
+func (m *Model) applyNamespace(ns string) {
+	m.namespace = ns
+	m.rowIdx, m.rowScroll = 0, 0
+	m.saveConfig()
+
+	label := ns
+	if ns == domain.AllNamespaces {
+		label = "all namespaces"
+	}
+	m.toast = "namespace → " + label
+}
+
+// allNamespacesRow builds the synthetic leading row for the Namespaces
+// table, sized to whatever columns the backend reports.
+func allNamespacesRow(cols []string) []string {
+	row := make([]string, len(cols))
+	for i := range row {
+		row[i] = "—"
+	}
+	if len(row) > 0 {
+		row[0] = domain.AllNamespaces
+	}
+	return row
+}
+
 // tableTotal is the row count before the row search is applied, for the
-// "matches/total" counter in the search box.
+// "matches/total" counter in the search box. The visible kind is always
+// loaded by the time this runs, but fall back to the rendered rows rather
+// than ever printing an unknown-count sentinel.
 func (m *Model) tableTotal() int {
-	return mock.VisibleCount(m.res(), mock.Cluster.Namespace)
+	if n := m.src.RowCount(m.curKind().Key, m.namespace); n != domain.CountUnknown {
+		return n
+	}
+	_, rows := m.src.Rows(m.curKind().Key, m.namespace)
+	return len(rows)
 }
 
 func filterRows(rows [][]string, q string) [][]string {
@@ -231,7 +443,7 @@ func (m *Model) curName() string {
 		return "-"
 	}
 	key := "NAME"
-	if m.res().Key == "events" {
+	if m.curKind().Key == "events" {
 		key = "OBJECT"
 	}
 	cols, _ := m.tableData()
@@ -247,8 +459,8 @@ func (m *Model) curName() string {
 // filter when it names one namespace, or — under /ns all — whatever that
 // row's own NAMESPACE cell says, since rows there span many namespaces.
 func (m *Model) curNamespace() string {
-	if mock.Cluster.Namespace != mock.AllNamespaces {
-		return mock.Cluster.Namespace
+	if m.namespace != domain.AllNamespaces {
+		return m.namespace
 	}
 	row := m.curRow()
 	cols, _ := m.tableData()
@@ -257,10 +469,41 @@ func (m *Model) curNamespace() string {
 			return row[i]
 		}
 	}
-	return mock.Cluster.Namespace
+	return m.namespace
 }
 
-func (m *Model) Init() tea.Cmd { return textinput.Blink }
+// SetToast overrides the startup status message (used by main.go to report
+// e.g. a fallback to mock mode when no cluster is reachable).
+func (m *Model) SetToast(s string) { m.toast = s }
+
+func (m *Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{textinput.Blink, m.repaintTick()}
+	if m.initialCtx != "" {
+		ctx := m.initialCtx
+		m.initialCtx = ""
+		cmds = append(cmds, m.switchContextCmd(ctx))
+	}
+	return tea.Batch(cmds...)
+}
+
+func tick() tea.Cmd { return tickEvery(2 * time.Second) }
+
+func tickEvery(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// repaintTick polls faster while the visible kind is still loading, so a
+// freshly-opened resource fills in promptly, then backs off once its cache
+// has synced. Backends that don't report sync state (the offline demo) just
+// get the steady rate.
+func (m *Model) repaintTick() tea.Cmd {
+	if sy, ok := m.src.(interface{ Synced(string) bool }); ok {
+		if !sy.Synced(m.curKind().Key) {
+			return tickEvery(150 * time.Millisecond)
+		}
+	}
+	return tick()
+}
 
 // ---- geometry -------------------------------------------------------------
 
@@ -275,6 +518,11 @@ type layout struct {
 
 func (m *Model) layout() layout {
 	l := layout{headerH: 4, promptH: 3}
+	if m.promptZoom {
+		// Half the screen: enough to read a long command or an AI prompt
+		// while composing it, without hiding the table entirely.
+		l.promptH = clamp(m.h/2, 3, maxi(3, m.h-l.headerH-4))
+	}
 	l.midY = l.headerH
 	l.statusY = m.h - 1
 	l.promptY = m.h - 1 - l.promptH
@@ -308,6 +556,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		if m.mode == modeShell && m.shellSess != nil {
+			cols, rows := m.shellSize()
+			m.shellTerm.Resize(cols, rows)
+			m.shellSess.Resize(cols, rows)
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -315,11 +568,245 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m, m.handleKey(msg)
+
+	case tickMsg:
+		m.anim++
+		return m, m.repaintTick()
+
+	case flashDoneMsg:
+		if msg.gen == m.flashGen {
+			m.flashAct = ""
+		}
+		return m, nil
+
+	case textResultMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+			return m, nil
+		}
+		m.showText(msg.title, msg.body)
+		return m, nil
+
+	case actionResultMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+		} else {
+			m.toast = msg.toast
+		}
+		return m, nil
+
+	case ctxSwitchMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.toast = "✗ context " + msg.name + ": " + msg.err.Error()
+			return m, nil
+		}
+		m.src.Close()
+		m.src = msg.src
+		m.namespace = m.src.DefaultNamespace()
+		m.resIdx, m.search = 0, ""
+		m.rowIdx, m.rowScroll = 0, 0
+		m.rowMem = map[string]int{}
+		m.saveConfig()
+		m.toast = "context → " + m.src.ClusterInfo().Context
+		return m, nil
+
+	case logStartMsg:
+		m.busy = false
+		if errors.Is(msg.err, domain.ErrNoLogs) {
+			// Not a failure — this kind simply has no logs. Show what it
+			// does have rather than an error the user can do nothing about.
+			m.toast = "no logs for " + msg.name + " — showing describe"
+			return m, m.runFetch("describe "+msg.name, func() (string, error) {
+				return m.src.Describe(msg.kind, msg.ns, msg.name)
+			})
+		}
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+			return m, nil
+		}
+		if m.logStop != nil {
+			m.logStop()
+			m.logStop = nil
+		}
+		m.logGen++
+		m.mode = modeLogs
+		m.focus = focusMain
+		m.textTitle = msg.title
+		m.textLines = msg.lines
+		m.logKind, m.logNS, m.logName = msg.kind, msg.ns, msg.name
+		m.logMore = msg.more
+		m.logTail = logChunk
+		m.logLoading = false
+		m.logScroll = 0
+		m.logFollow = true
+		m.toast = msg.title
+		if msg.ch == nil {
+			return m, nil // history only; nothing to follow
+		}
+		m.logStop = msg.stop
+		m.logCh = msg.ch
+		return m, waitLogLine(m.logGen, m.logCh)
+
+	case shellStartMsg:
+		m.busy = false
+		if errors.Is(msg.err, domain.ErrNoShell) {
+			m.toast = "no interactive shell here (offline demo, or not a pod)"
+			return m, nil
+		}
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+			return m, nil
+		}
+		m.closeShell("")
+		m.shellGen++
+		m.shellSess = msg.sess
+		m.shellTerm = vt10x.New(vt10x.WithSize(msg.cols, msg.rows))
+		m.shellName = msg.name
+		m.mode = modeShell
+		m.focus = focusMain
+		m.toast = "shell into " + msg.name + " · " + detachKey + " to detach"
+		return m, waitShellOut(m.shellGen, msg.sess.Output())
+
+	case shellOutMsg:
+		if msg.gen != m.shellGen || m.shellTerm == nil {
+			return m, nil // a stale session's output
+		}
+		if !msg.ok {
+			m.closeShell("shell session ended")
+			return m, nil
+		}
+		m.shellTerm.Write(msg.data)
+		return m, waitShellOut(m.shellGen, m.shellSess.Output())
+
+	case logOlderMsg:
+		m.logLoading = false
+		if msg.err != nil || msg.kind != m.logKind || msg.name != m.logName {
+			if msg.err != nil {
+				m.toast = "✗ " + msg.err.Error()
+			}
+			return m, nil
+		}
+		// Keep the newest lines we already have (the stream may have added
+		// some) and prepend whatever is older than our current first line.
+		if added := len(msg.lines) - len(m.textLines); added > 0 {
+			m.textLines = append(msg.lines[:added:added], m.textLines...)
+		}
+		m.logMore = msg.more
+		return m, nil
+
+	case logLineMsg:
+		if msg.gen != m.logGen {
+			return m, nil // stale stream, user moved on
+		}
+		if !msg.ok {
+			m.textLines = append(m.textLines, "── stream closed")
+			return m, nil
+		}
+		m.textLines = append(m.textLines, msg.line)
+		// While paused, a new line arriving at the bottom would shift the
+		// view; keep the same content in place by growing the offset.
+		if !m.logFollow {
+			m.logScroll++
+		}
+		return m, waitLogLine(m.logGen, m.logCh)
+
+	case editFetchedMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+			return m, nil
+		}
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		c := exec.Command(editor, msg.path)
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
+		})
+
+	case editExitMsg:
+		defer os.Remove(msg.path)
+		if msg.err != nil {
+			m.toast = "✗ editor: " + msg.err.Error()
+			return m, nil
+		}
+		data, err := os.ReadFile(msg.path)
+		if err != nil {
+			m.toast = "✗ " + err.Error()
+			return m, nil
+		}
+		kind, ns, name := msg.kind, msg.ns, msg.name
+		return m, m.runAction("✓ "+name+" updated", func() error {
+			return m.src.Apply(kind, ns, name, string(data))
+		})
+
+	case portForwardMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.toast = "✗ " + msg.err.Error()
+			return m, nil
+		}
+		if stop, ok := m.portFwds[msg.key]; ok && stop != nil {
+			stop()
+		}
+		m.portFwds[msg.key] = msg.stop
+		m.toast = "⟩ port-forward " + msg.key + " → " + msg.addr
+		return m, nil
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+func waitLogLine(gen int, ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-ch
+		return logLineMsg{gen: gen, line: line, ok: ok}
+	}
+}
+
+// startBusy marks the panel as waiting on something. Every async action
+// goes through here so pressing a key always produces visible feedback,
+// even for actions whose only result is a toast.
+func (m *Model) startBusy(label string) {
+	m.busy = true
+	m.busyLabel = label
+}
+
+// runFetch wraps a blocking read (describe/YAML/logs/top/AI) as an async
+// tea.Cmd so the UI never blocks on network I/O.
+func (m *Model) runFetch(title string, fn func() (string, error)) tea.Cmd {
+	m.toast = "… " + title
+	m.startBusy(title)
+	return func() tea.Msg {
+		body, err := fn()
+		return textResultMsg{title: title, body: body, err: err}
+	}
+}
+
+// runAction wraps a blocking mutating call (delete/restart/scale/cordon/
+// drain/apply) as an async tea.Cmd.
+func (m *Model) runAction(okToast string, fn func() error) tea.Cmd {
+	m.startBusy(strings.TrimPrefix(okToast, "✓ "))
+	return func() tea.Msg {
+		err := fn()
+		return actionResultMsg{toast: okToast, err: err}
+	}
+}
+
+func (m *Model) switchContextCmd(name string) tea.Cmd {
+	m.toast = "… switching context"
+	m.startBusy("connecting to " + name)
+	src := m.src
+	return func() tea.Msg {
+		ns, err := src.SwitchContext(name)
+		return ctxSwitchMsg{name: name, src: ns, err: err}
+	}
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -336,7 +823,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			cb := m.confirm.onOK
 			m.confirm = nil
 			if cb != nil {
-				cb(m)
+				return cb(m)
 			}
 		case "esc", "n", "N", "q":
 			m.confirm = nil
@@ -345,28 +832,102 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	// AI settings modal
-	if m.cfgOpen {
-		return m.handleCfgKey(msg)
+	if m.palOpen {
+		return m.handlePaletteKey(msg)
+	}
+
+	// settings (also the first-run screen) takes priority over everything
+	// but quit
+	if m.setOpen {
+		return m.handleSettingsKey(msg)
+	}
+
+	// theme picker
+	if m.themeOpen {
+		return m.handleThemeKey(msg)
+	}
+
+	// A running shell owns the keyboard: everything except the detach key
+	// belongs to the program in the pod.
+	if m.mode == modeShell {
+		return m.handleShellKey(msg)
 	}
 
 	// prompt captures printable input
 	if m.focus == focusPrompt {
+		sug := m.suggestions()
 		switch key {
 		case "esc":
+			// esc backs out one step at a time: shrink first, leave second.
+			if m.promptZoom {
+				m.promptZoom = false
+				return nil
+			}
 			m.focus = focusMain
+			m.sugIdx = 0
 			m.input.Blur()
+			return nil
+		case "ctrl+z":
+			m.promptZoom = !m.promptZoom
 			return nil
 		case "ctrl+a":
 			m.togglePromptMode()
 			return nil
+		case "up":
+			if len(sug) > 0 {
+				m.sugIdx = (m.sugIdx - 1 + len(sug)) % len(sug)
+				return nil
+			}
+		case "down":
+			if len(sug) > 0 {
+				m.sugIdx = (m.sugIdx + 1) % len(sug)
+				return nil
+			}
+		case "tab":
+			// With the popup open, tab completes the highlighted suggestion
+			// so the list is usable without the mouse. Otherwise it toggles
+			// back to the table, the other half of the tab pairing.
+			if len(sug) > 0 {
+				m.acceptSuggestion(sug[clamp(m.sugIdx, 0, len(sug)-1)])
+				return nil
+			}
+			return m.focusNext(1)
+		case "shift+tab":
+			return m.focusNext(-1)
 		case "enter":
-			m.runCommand(strings.TrimSpace(m.input.Value()))
+			// Enter runs the highlighted suggestion outright — having to
+			// pick it and then press enter again was pure friction. The one
+			// exception is a command that still needs an argument: fill it
+			// in so the argument can be typed.
+			if len(sug) > 0 {
+				c := sug[clamp(m.sugIdx, 0, len(sug)-1)]
+				if c.Args != "" && !hasArgument(m.input.Value()) {
+					m.acceptSuggestion(c)
+					return nil
+				}
+				if !hasArgument(m.input.Value()) {
+					m.input.SetValue(c.Name)
+				}
+			}
+			cmd := m.runCommand(strings.TrimSpace(m.input.Value()))
 			m.input.SetValue("")
-			return nil
+			m.sugIdx = 0
+			return cmd
 		}
+		before := m.input.Value()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		if v := m.input.Value(); v != before {
+			m.sugIdx = 0 // the candidate list just changed underneath us
+			// A command that isn't a "/" or ":" command is free text — a
+			// kubectl line or an AI question — and those get long, so the
+			// box grows to fit instead of scrolling a 1-row field.
+			if v != "" && !isCommandPrefix(v[0]) {
+				m.promptZoom = true
+			} else if v == "" {
+				m.promptZoom = false
+			}
+		}
 		return cmd
 	}
 
@@ -390,16 +951,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		case "tab":
-			m.focus = focusMain
-			return nil
+			return m.focusNext(1)
 		case "shift+tab":
-			m.focus = focusActions
-			return nil
+			return m.focusNext(-1)
 		case "right", "enter":
 			m.focus = focusMain
 			return nil
 		case ":", "/":
 			return m.openPrompt(key)
+		}
+		if cmd, handled := m.globalShortcut(msg); handled {
+			return cmd
 		}
 		if msg.Type == tea.KeyRunes && len(key) < 24 {
 			m.search += string(msg.Runes)
@@ -434,11 +996,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		case "tab":
-			m.focus = focusActions
-			return nil
+			m.focus = focusMain
+			return m.focusNext(1)
 		case "shift+tab":
-			m.focus = focusList
-			return nil
+			m.focus = focusMain
+			return m.focusNext(-1)
+		}
+		// Navigation and global shortcuts keep working while typing a
+		// filter, so you never have to leave the box first. Only bare
+		// printable runes are treated as search text.
+		if cmd, handled := m.globalShortcut(msg); handled {
+			return cmd
 		}
 		if msg.Type == tea.KeyRunes && len(key) < 24 {
 			m.rowSearch += string(msg.Runes)
@@ -449,7 +1017,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// `/` while browsing a table searches its rows (like less/vim); anywhere
 	// else it opens the global command prompt pre-filled with "/".
-	if key == "/" && m.focus == focusMain && m.mode == modeTable {
+	// "f" (find) opens the focused pane's own search box; "/" is reserved
+	// for the command prompt everywhere, so there is one consistent answer
+	// to "where does slash go".
+	// (The resource list is already type-to-filter and returns earlier, so
+	// this only ever concerns the main table.)
+	if key == "f" && m.focus == focusMain && m.mode == modeTable {
 		m.focus = focusMainSearch
 		return nil
 	}
@@ -459,14 +1032,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case ":", "/":
 		return m.openPrompt(key)
+	case "enter":
+		// Opening an item goes to the most useful view it has: logs for
+		// anything that produces them, otherwise describe.
+		return m.openSelected()
+	case "ctrl+p":
+		return m.openPalette()
+	case "ctrl+s":
+		return m.toggleMouse()
 	case "ctrl+a":
 		m.togglePromptMode()
 		m.focus = focusPrompt
 		return m.input.Focus()
 	case "tab":
-		m.focus = (m.focus + 1) % 3
+		return m.focusNext(1)
 	case "shift+tab":
-		m.focus = (m.focus + 2) % 3
+		return m.focusNext(-1)
 	case "T":
 		m.themeIdx = (m.themeIdx + 1) % len(theme.Themes)
 		m.toast = "theme → " + m.th().Name
@@ -480,45 +1061,305 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.toast = map[bool]string{true: "zoomed", false: "restored"}[m.zoomed]
 	case "esc":
 		switch {
-		case m.mode == modeText:
+		case m.mode == modeText || m.mode == modeLogs || m.mode == modeContexts:
+			if m.logStop != nil {
+				m.logStop()
+				m.logStop = nil
+			}
 			m.mode = modeTable
 		case m.zoomed:
 			m.zoomed = false
 		}
-	case "up", "k":
+	case "up":
 		m.move(-1)
-	case "down", "j":
+		return m.maybeLoadOlder()
+	case "down":
 		m.move(1)
+		return m.maybeLoadOlder()
+	case "k":
+		// "k" is a command name, not a direction: open the prompt with it
+		// already typed so "k get pods" flows straight from the keystroke.
+		// This is why j/k are no longer bound to movement.
+		return m.openPrompt("k")
 	case "pgup", "ctrl+b":
 		m.move(-m.visibleRows())
+		return m.maybeLoadOlder()
 	case "pgdown", "ctrl+f":
 		m.move(m.visibleRows())
+		return m.maybeLoadOlder()
 	case "home", "g":
 		m.move(-1 << 20)
 	case "end", "G":
+		if m.mode == modeLogs {
+			// End is the canonical "resume following" gesture.
+			m.logScroll = 0
+			m.logFollow = true
+			return nil
+		}
 		m.move(1 << 20)
-	case "left", "h":
-		m.focus = focusList
-	case "right":
-		m.focus = focusMain
+
 	default:
-		for _, a := range mock.Actions {
+		for _, a := range Actions {
 			if a.Key == key {
-				m.fireAction(a)
-				return nil
+				return m.fireAction(a)
 			}
 		}
 	}
 	return nil
 }
 
+// openPrompt focuses the command box, optionally seeding it. The two
+// command prefixes pre-fill so their popup appears immediately; a CLI name
+// pre-fills so typing it starts the command it looks like.
 func (m *Model) openPrompt(key string) tea.Cmd {
 	m.focus = focusPrompt
-	if key == "/" {
-		m.input.SetValue("/")
+	if key != "" {
+		m.input.SetValue(key)
+		if !isCommandPrefix(key[0]) {
+			// Free text: the box grows, same as typing it would.
+			m.promptZoom = true
+		}
 	}
 	m.input.CursorEnd()
 	return m.input.Focus()
+}
+
+// paneAt returns which of the three middle panes contains (x, y), and
+// whether the point is inside the middle band at all.
+func (m *Model) paneAt(x, y int) (focusPane, bool) {
+	l := m.layout()
+	if y < l.midY || y >= l.midY+l.midH {
+		return 0, false // header, prompt or status bar
+	}
+	switch {
+	case !m.zoomed && x < l.leftW:
+		return focusList, true
+	case !m.zoomed && x >= l.leftW+l.mainW:
+		return focusActions, true
+	default:
+		return focusMain, true
+	}
+}
+
+// focusPaneAt gives a pane keyboard focus because it was clicked or
+// scrolled — anywhere inside its bounds counts, including empty space
+// below the last row.
+func (m *Model) focusPaneAt(x, y int) {
+	pane, ok := m.paneAt(x, y)
+	// Only the centre pane is focusable; clicking or scrolling the side
+	// panes acts on them without moving keyboard focus there.
+	if !ok || pane != focusMain {
+		return
+	}
+	// Don't yank focus out of the row-search box just because the table it
+	// filters was clicked; they're the same pane from the user's side.
+	if m.focus == focusMainSearch {
+		return
+	}
+	m.focus = focusMain
+}
+
+// scrollModal moves the selection inside whichever popup is open, so the
+// wheel does something sensible there instead of leaking to the background.
+func (m *Model) scrollModal(delta int) {
+	switch {
+	case m.themeOpen:
+		if m.themeSave && delta < 0 {
+			m.themeSave = false
+			m.themeRow = len(theme.Themes) - 1
+		} else if !m.themeSave {
+			next := m.themeRow + delta
+			if next >= len(theme.Themes) {
+				m.themeSave = true
+			} else {
+				m.themeRow = clamp(next, 0, len(theme.Themes)-1)
+			}
+		}
+		m.previewTheme()
+
+	case m.palOpen:
+		if hits := m.paletteHits(); len(hits) > 0 {
+			m.palIdx = clamp(m.palIdx+delta, 0, len(hits)-1)
+		}
+
+	case m.setOpen:
+		if m.setRow == setSaveRow {
+			if delta < 0 {
+				m.setRow = setRows() - 1
+			}
+		} else {
+			next := m.setRow + delta
+			if next >= setRows() {
+				m.setRow = setSaveRow
+			} else {
+				m.setRow = clamp(next, 0, setRows()-1)
+			}
+		}
+	}
+}
+
+// scrollPaneAt scrolls whichever pane the point (x, y) falls in, and focuses
+// it — scrolling a pane is a statement of intent about where you're working.
+func (m *Model) scrollPaneAt(x, y, delta int) {
+	pane, ok := m.paneAt(x, y)
+	if !ok {
+		return
+	}
+	m.focusPaneAt(x, y)
+
+	// Only the centre pane scrolls. The resource list changes the whole
+	// view as it moves, so scrolling it by accident while reaching for the
+	// table was more disruptive than useful; pick a kind by clicking it,
+	// ctrl+p or :search.
+	if pane == focusMain {
+		m.scrollMain(delta)
+	}
+}
+
+// scrollList moves the resource-list selection without stealing focus.
+func (m *Model) scrollList(delta int) { m.moveList(delta) }
+
+// scrollMain scrolls the centre pane, honouring whether it's showing a
+// table or a text view.
+func (m *Model) scrollMain(delta int) {
+	if m.mode == modeLogs {
+		m.logScrollBy(-delta)
+		return
+	}
+	if m.mode == modeText {
+		m.textTop = clamp(m.textTop+delta, 0, maxi(0, len(m.textLines)-(m.layout().midH-2)))
+		return
+	}
+	_, rows := m.tableData()
+	m.rowIdx = clamp(m.rowIdx+delta, 0, maxi(0, len(rows)-1))
+	m.rowMem[m.curKind().Key] = m.rowIdx
+	m.syncScroll()
+}
+
+// doubleClickWindow is how close two clicks on the same row must be to count
+// as one double-click. Bubbletea reports presses individually, so the pair
+// has to be recognised here.
+const doubleClickWindow = 400 * time.Millisecond
+
+// flashLen is how long a clicked action stays lit. Long enough to register,
+// short enough not to feel like a stuck state.
+const flashLen = 160 * time.Millisecond
+
+// flashAction lights an action row briefly so a click is visibly acknowledged
+// even when the action itself only produces a toast.
+func (m *Model) flashAction(id string) tea.Cmd {
+	m.flashAct = id
+	m.flashGen++
+	gen := m.flashGen
+	return tea.Tick(flashLen, func(time.Time) tea.Msg {
+		return flashDoneMsg{gen: gen}
+	})
+}
+
+// openSelected is what Enter does on a row: show logs when the kind has
+// them, and fall back to describe when it doesn't — every kind has a
+// describe, so this always lands somewhere useful.
+func (m *Model) openSelected() tea.Cmd {
+	if m.mode == modeContexts {
+		return m.chooseContext()
+	}
+
+	r := m.curKind()
+
+	// On the Namespaces table, "open" means "work in this namespace" — that
+	// is what you came to the list for. Describe is still on `d`.
+	if r.Key == "namespaces" {
+		if name := m.curName(); name != "" && name != "-" {
+			m.applyNamespace(name)
+			back := m.nsReturnKind
+			if back == "" {
+				back = "pods"
+			}
+			m.jumpToResource(back)
+			label := name
+			if name == domain.AllNamespaces {
+				label = "all namespaces"
+			}
+			m.toast = "namespace → " + label + "   ·   " + m.nsReturnLabel()
+		}
+		return nil
+	}
+
+	want := domain.ALogs
+	if !r.Can(want) {
+		want = domain.ADescribe
+	}
+	for _, a := range Actions {
+		if a.ID == want {
+			return m.fireAction(a)
+		}
+	}
+	return nil
+}
+
+// focusNext moves one step around the tab cycle, focusing or blurring the
+// prompt's text input as needed.
+func (m *Model) focusNext(dir int) tea.Cmd {
+	next := nextFocus(m.focus, dir)
+	if next == focusPrompt {
+		return m.openPrompt("")
+	}
+	m.focus = next
+	m.input.Blur()
+	return nil
+}
+
+// globalShortcut handles the keys that must work even while a search box has
+// focus — pane switching, the command prompt, zoom, copy-mode. Returns
+// handled=false for anything that should be treated as search text instead.
+//
+// Only non-printable or modifier combinations qualify: a bare letter always
+// belongs to whatever the user is typing.
+func (m *Model) globalShortcut(msg tea.KeyMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+p":
+		return m.openPalette(), true
+	case "ctrl+s":
+		return m.toggleMouse(), true
+
+	case "ctrl+z":
+		m.zoomed = !m.zoomed
+		return nil, true
+	case "pgup", "ctrl+b":
+		m.move(-m.visibleRows())
+		return nil, true
+	case "pgdown", "ctrl+f":
+		m.move(m.visibleRows())
+		return nil, true
+	}
+	return nil, false
+}
+
+// toggleMouse turns mouse capture off and on. While k10s captures the mouse
+// the terminal can't do its own click-drag selection, so there is no way to
+// copy text out; switching capture off hands selection back to the terminal
+// (clicking rows/buttons stops working until it's switched back).
+func (m *Model) toggleMouse() tea.Cmd {
+	m.mouseOff = !m.mouseOff
+	if m.mouseOff {
+		m.toast = "mouse off — drag to select & copy · ctrl+s to re-enable clicking"
+		return tea.DisableMouse
+	}
+	m.toast = "mouse on — click rows, actions and buttons"
+	return tea.EnableMouseCellMotion
+}
+
+// acceptSuggestion fills the prompt with a slash command. Commands that take
+// no argument are left ready to run; the rest get a trailing space so the
+// user can type the argument straight away.
+func (m *Model) acceptSuggestion(c SlashCommand) {
+	v := c.Name
+	if c.Args != "" {
+		v += " "
+	}
+	m.input.SetValue(v)
+	m.input.CursorEnd()
+	m.sugIdx = 0
 }
 
 func (m *Model) togglePromptMode() {
@@ -529,77 +1370,6 @@ func (m *Model) togglePromptMode() {
 		m.pmode = promptCmd
 		m.toast = "command mode"
 	}
-}
-
-func (m *Model) handleCfgKey(msg tea.KeyMsg) tea.Cmd {
-	key := msg.String()
-
-	if m.cfgEditing {
-		switch key {
-		case "enter":
-			v := strings.TrimSpace(m.input.Value())
-			switch m.cfgRow {
-			case 1:
-				m.cfg.url = v
-			case 2:
-				m.cfg.model = v
-			case 3:
-				m.cfg.key = v
-			}
-			m.cfgEditing = false
-			m.input.SetValue("")
-			m.input.Blur()
-			m.saveConfig()
-			m.toast = "saved → " + config.Path()
-		case "esc":
-			m.cfgEditing = false
-			m.input.SetValue("")
-			m.input.Blur()
-		default:
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return cmd
-		}
-		return nil
-	}
-
-	switch key {
-	case "esc", "q":
-		m.cfgOpen = false
-	case "up", "k":
-		m.cfgRow = clamp(m.cfgRow-1, 0, 3)
-	case "down", "j", "tab":
-		m.cfgRow = clamp(m.cfgRow+1, 0, 3)
-	case "left", "right", "h", "l":
-		if m.cfgRow == 0 {
-			m.setProvider(1 - m.cfg.provider)
-		}
-	case "enter":
-		if m.cfgRow == 0 {
-			m.setProvider(1 - m.cfg.provider)
-			return nil
-		}
-		m.cfgEditing = true
-		switch m.cfgRow {
-		case 1:
-			m.input.SetValue(m.cfg.url)
-		case 2:
-			m.input.SetValue(m.cfg.model)
-		case 3:
-			m.input.SetValue("")
-		}
-		m.input.CursorEnd()
-		return m.input.Focus()
-	}
-	return nil
-}
-
-func (m *Model) setProvider(p int) {
-	m.cfg.provider = p
-	m.cfg.url = mock.AIProviders[p].URL
-	m.cfg.model = mock.AIProviders[p].Model
-	m.saveConfig()
-	m.toast = "provider → " + mock.AIProviders[p].Label
 }
 
 func (m *Model) applySearch() {
@@ -636,13 +1406,21 @@ func (m *Model) move(delta int) {
 		m.moveList(delta)
 	case focusActions:
 	default:
+		if m.mode == modeContexts {
+			m.ctxIdx = clamp(m.ctxIdx+delta, 0, maxi(0, len(m.ctxChoices())-1))
+			return
+		}
+		if m.mode == modeLogs {
+			m.logScrollBy(-delta) // up the screen = toward older entries
+			return
+		}
 		if m.mode == modeText {
 			m.textTop = clamp(m.textTop+delta, 0, maxi(0, len(m.textLines)-(m.layout().midH-2)))
 			return
 		}
 		_, rows := m.tableData()
 		m.rowIdx = clamp(m.rowIdx+delta, 0, maxi(0, len(rows)-1))
-		m.rowMem[m.res().Key] = m.rowIdx
+		m.rowMem[m.curKind().Key] = m.rowIdx
 		m.syncScroll()
 	}
 }
@@ -675,72 +1453,100 @@ func (m *Model) selectResource(i int) {
 	m.resIdx = i
 	m.mode = modeTable
 	m.rowSearch = ""
-	m.rowIdx = m.rowMem[m.res().Key]
+	m.rowIdx = m.rowMem[m.curKind().Key]
 	_, rows := m.tableData()
 	m.rowIdx = clamp(m.rowIdx, 0, maxi(0, len(rows)-1))
 	m.rowScroll = 0
 	m.syncScroll()
-	m.toast = "→ " + m.res().Name
+	m.toast = "→ " + m.curKind().Name
 }
 
-func (m *Model) fireAction(a mock.Action) {
-	r := m.res()
+func (m *Model) fireAction(a Action) tea.Cmd {
+	r := m.curKind()
 	name := m.curName()
+	kind := r.Key
+	ns := m.curNamespace()
 
 	if !r.Can(a.ID) {
 		m.toast = fmt.Sprintf("✗ %s is not available for %s", a.Label, r.Name)
-		return
+		return nil
 	}
 	if _, rows := m.tableData(); len(rows) == 0 {
 		m.toast = "✗ nothing selected"
-		return
+		return nil
 	}
 
 	switch a.ID {
-	case mock.ADescribe:
-		m.showText("describe "+r.Short+"/"+name, mock.Describe(r.Name, name))
-	case mock.AYAML:
-		m.showText("yaml "+r.Short+"/"+name, mock.YAML(strings.TrimSuffix(r.Name, "s"), name))
-	case mock.ALogs:
-		m.showText("logs -f "+name, mock.Logs(name))
-	case mock.ARestart:
+	case domain.ADescribe:
+		return m.runFetch("describe "+r.Short+"/"+name, func() (string, error) {
+			return m.src.Describe(kind, ns, name)
+		})
+	case domain.AYAML:
+		return m.runFetch("yaml "+r.Short+"/"+name, func() (string, error) {
+			return m.src.YAML(kind, ns, name)
+		})
+	case domain.ALogs:
+		return m.startLogs(kind, ns, name)
+	case domain.ARestart:
 		m.confirm = &confirmState{
 			title:   "Rollout restart",
 			message: []string{"Restart every pod of", r.Short + "/" + name + " ?", "", "Rolling update — zero downtime with 2+ replicas."},
-			onOK: func(mm *Model) {
-				mm.toast = "✓ " + r.Short + "/" + name + " restarted (mock)"
+			onOK: func(mm *Model) tea.Cmd {
+				return mm.runAction("✓ "+r.Short+"/"+name+" restarted", func() error {
+					return mm.src.Restart(kind, ns, name)
+				})
 			},
 		}
-	case mock.ADelete:
+	case domain.ADelete:
 		m.confirm = &confirmState{
 			title:   "Delete " + r.Short,
 			danger:  true,
-			message: []string{"Permanently delete", r.Short + "/" + name, "namespace: " + m.curNamespace(), "", "This action CANNOT be undone."},
-			onOK: func(mm *Model) {
-				mm.toast = "✓ " + r.Short + "/" + name + " deleted (mock)"
+			message: []string{"Permanently delete", r.Short + "/" + name, "namespace: " + ns, "", "This action CANNOT be undone."},
+			onOK: func(mm *Model) tea.Cmd {
+				return mm.runAction("✓ "+r.Short+"/"+name+" deleted", func() error {
+					return mm.src.Delete(kind, ns, name)
+				})
 			},
 		}
-	case mock.AShell:
-		m.toast = "⟩ kubectl exec -it " + name + " -- /bin/sh (mock)"
-	case mock.APortFwd:
-		m.toast = "⟩ port-forward " + name + " 8080:8080 → localhost:8080 (mock)"
-	case mock.AEdit:
-		m.toast = "⟩ opening $EDITOR for " + r.Short + "/" + name + " (mock)"
-	case mock.AScale:
-		m.toast = "⟩ scale " + r.Short + "/" + name + " --replicas=? (mock)"
-	case mock.ATop:
-		if r.Key == "nodes" {
-			m.showText("top no/"+name, mock.TopNode(name))
-		} else {
-			m.showText("top po/"+name, mock.TopPod(name))
+	case domain.AShell:
+		return m.startShellSession(kind, ns, name)
+	case domain.APortFwd:
+		return m.startPortForward(kind, ns, name)
+	case domain.AEdit:
+		return m.startEdit(kind, ns, name)
+	case domain.AScale:
+		total := "1"
+		if row := m.curRow(); len(row) > 0 {
+			cols, _ := m.tableData()
+			for i, c := range cols {
+				if c == "READY" && i < len(row) {
+					if _, t, ok := strings.Cut(row[i], "/"); ok {
+						total = t
+					}
+				}
+			}
 		}
-	case mock.ACordon:
-		if mock.ToggleCordon(name) {
-			m.toast = "✓ node/" + name + " cordoned (mock) — unschedulable"
-		} else {
-			m.toast = "✓ node/" + name + " uncordoned (mock) — schedulable"
+		m.focus = focusPrompt
+		m.pmode = promptCmd
+		m.input.SetValue(":scale " + total)
+		m.input.CursorEnd()
+		return m.input.Focus()
+	case domain.ATop:
+		if kind == "nodes" {
+			return m.runFetch("top no/"+name, func() (string, error) { return m.src.TopNode(name) })
 		}
-	case mock.ADrain:
+		return m.runFetch("top po/"+name, func() (string, error) { return m.src.TopPod(ns, name) })
+	case domain.ACordon:
+		cordoned := strings.Contains(rowStatus(m), "SchedulingDisabled")
+		disable := !cordoned
+		verb := "cordoned"
+		if !disable {
+			verb = "uncordoned"
+		}
+		return m.runAction(fmt.Sprintf("✓ node/%s %s", name, verb), func() error {
+			return m.src.Cordon(name, disable)
+		})
+	case domain.ADrain:
 		m.confirm = &confirmState{
 			title:  "Drain node",
 			danger: true,
@@ -749,15 +1555,146 @@ func (m *Model) fireAction(a mock.Action) {
 				"Pods are rescheduled onto other nodes.",
 				"DaemonSet-managed pods are not evicted.",
 			},
-			onOK: func(mm *Model) {
-				mock.SetCordon(name, true)
-				mm.toast = "✓ node/" + name + " drained (mock) — cordoned, pods evicted"
+			onOK: func(mm *Model) tea.Cmd {
+				return mm.runAction("✓ node/"+name+" drained", func() error {
+					return mm.src.Drain(name)
+				})
 			},
+		}
+	}
+	return nil
+}
+
+// rowStatus reads the STATUS cell of the current row (nodes kind), if any.
+func rowStatus(m *Model) string {
+	row := m.curRow()
+	cols, _ := m.tableData()
+	for i, c := range cols {
+		if c == "STATUS" && i < len(row) {
+			return row[i]
+		}
+	}
+	return ""
+}
+
+func (m *Model) startLogs(kind, ns, name string) tea.Cmd {
+	// No busy spinner here: the log view opens already scrolled to the
+	// newest line, and flashing a spinner first made entering logs look
+	// like it jumped. The status line inside the viewer covers the wait.
+	m.toast = "… loading logs"
+	src := m.src
+	return func() tea.Msg {
+		// Load a page of history first so the view opens with content, then
+		// attach the follow stream on top of it.
+		lines, more, err := src.LogsTail(kind, ns, name, logChunk)
+		if err != nil {
+			return logStartMsg{kind: kind, ns: ns, name: name, err: err}
+		}
+		ch, stop, ferr := src.LogsFollow(kind, ns, name)
+		if ferr != nil {
+			// History is still worth showing even if following failed.
+			return logStartMsg{
+				kind: kind, ns: ns, name: name,
+				title: "logs " + name, lines: lines, more: more,
+			}
+		}
+		return logStartMsg{
+			kind: kind, ns: ns, name: name,
+			title: "logs -f " + name, lines: lines, more: more,
+			ch: ch, stop: stop,
 		}
 	}
 }
 
+// maybeLoadOlder fetches more history when the view has scrolled near the
+// oldest loaded line, so scrolling up keeps producing content.
+func (m *Model) maybeLoadOlder() tea.Cmd {
+	if m.mode != modeLogs || !m.logNeedsOlder() {
+		return nil
+	}
+	return m.loadOlderLogs()
+}
+
+// loadOlderLogs asks for a larger tail and keeps only the part that is new
+// at the top. The Kubernetes API has no backwards cursor, so re-reading with
+// a bigger tail is the only way to reach older entries.
+func (m *Model) loadOlderLogs() tea.Cmd {
+	if m.logLoading || !m.logMore {
+		return nil
+	}
+	m.logLoading = true
+	src := m.src
+	kind, ns, name := m.logKind, m.logNS, m.logName
+	want := m.logTail + logChunk
+	m.logTail = want
+
+	return func() tea.Msg {
+		lines, more, err := src.LogsTail(kind, ns, name, want)
+		return logOlderMsg{kind: kind, ns: ns, name: name, lines: lines, more: more, err: err}
+	}
+}
+
+func (m *Model) startShell(kind, ns, name string) tea.Cmd {
+	cmd, err := m.src.Shell(kind, ns, name)
+	if err != nil {
+		m.toast = "✗ " + err.Error()
+		return nil
+	}
+	if cmd == nil {
+		m.toast = "⟩ " + m.cli + " exec -it " + name + " -- /bin/sh (not supported here)"
+		return nil
+	}
+	return tea.Exec(cmd, func(err error) tea.Msg {
+		return actionResultMsg{toast: "✓ shell session closed", err: err}
+	})
+}
+
+func (m *Model) startPortForward(kind, ns, name string) tea.Cmd {
+	key := kind + "/" + ns + "/" + name
+	if stop, ok := m.portFwds[key]; ok && stop != nil {
+		stop()
+		delete(m.portFwds, key)
+		m.toast = "✓ port-forward " + key + " stopped"
+		return nil
+	}
+	m.toast = "… starting port-forward"
+	m.startBusy("port-forward " + name)
+	src := m.src
+	return func() tea.Msg {
+		addr, stop, err := src.PortForward(kind, ns, name)
+		if err == nil && addr == "" && stop == nil {
+			err = fmt.Errorf("port-forward is not supported here")
+		}
+		return portForwardMsg{key: key, addr: addr, stop: stop, err: err}
+	}
+}
+
+func (m *Model) startEdit(kind, ns, name string) tea.Cmd {
+	m.toast = "… opening $EDITOR for " + name
+	m.startBusy("opening $EDITOR")
+	src := m.src
+	return func() tea.Msg {
+		body, err := src.YAML(kind, ns, name)
+		if err != nil {
+			return editFetchedMsg{err: err}
+		}
+		f, err := os.CreateTemp("", "k10s-edit-*.yaml")
+		if err != nil {
+			return editFetchedMsg{err: err}
+		}
+		defer f.Close()
+		if _, err := f.WriteString(body); err != nil {
+			return editFetchedMsg{err: err}
+		}
+		return editFetchedMsg{kind: kind, ns: ns, name: name, path: f.Name()}
+	}
+}
+
 func (m *Model) showText(title, body string) {
+	if m.logStop != nil {
+		m.logStop()
+		m.logStop = nil
+	}
 	m.mode = modeText
 	m.textTitle = title
 	m.textLines = strings.Split(body, "\n")
@@ -768,112 +1705,117 @@ func (m *Model) showText(title, body string) {
 
 func (m *Model) closePrompt() {
 	m.focus = focusMain
+	m.promptZoom = false
 	m.input.Blur()
 }
 
-func (m *Model) runCommand(cmd string) {
+func (m *Model) runCommand(cmd string) tea.Cmd {
 	if cmd == "" {
 		m.closePrompt()
-		return
+		return nil
 	}
 
-	if strings.HasPrefix(cmd, "/") {
-		m.runSlash(cmd)
-		return
+	if isCommandPrefix(cmd[0]) {
+		return m.runSlash(cmd)
 	}
 
 	if m.pmode == promptAI {
-		m.showText("ai ✦ "+trunc(cmd, 48), mock.AIAnswer(cmd))
 		m.closePrompt()
-		return
+		return m.askAI(cmd)
 	}
 
-	for i, r := range mock.Resources {
+	// Typing any enabled CLI name is fine — "kubectl get pods", "k get pods"
+	// and "k8s get pods" all mean the same thing.
+	cmd = strings.TrimSpace(stripCLIPrefix(cmd, m.clis))
+
+	for _, r := range m.kinds() {
 		if strings.Contains(cmd, r.Key) || strings.Contains(cmd, " "+r.Short) {
-			m.selectResource(i)
-			m.toast = "$ kubectl " + cmd
+			for i, k := range m.kinds() {
+				if k.Key == r.Key {
+					m.selectResource(i)
+					break
+				}
+			}
+			m.toast = "$ " + m.cli + " " + cmd
 			m.closePrompt()
-			return
+			return nil
 		}
 	}
-	m.toast = "$ kubectl " + cmd + "  (mock)"
+	m.toast = "$ " + m.cli + " " + cmd + "  (not executed — read-only passthrough)"
 	m.closePrompt()
+	return nil
 }
 
-func (m *Model) runSlash(cmd string) {
+func (m *Model) askAI(prompt string) tea.Cmd {
+	m.startBusy("asking " + m.cfg.model)
+	cfg := ai.Config{
+		Provider: []string{"openai", "anthropic"}[m.cfg.provider],
+		BaseURL:  m.cfg.url,
+		Model:    m.cfg.model,
+		APIKey:   m.cfg.key,
+	}
+	cc := ai.Context{
+		ClusterContext: m.src.ClusterInfo().Context,
+		Namespace:      m.namespace,
+		ResourceKind:   m.curKind().Name,
+		SelectedName:   m.curName(),
+	}
+	title := "ai ✦ " + trunc(prompt, 48)
+	m.toast = "… asking " + m.cfg.model
+	return func() tea.Msg {
+		body, err := ai.Ask(context.Background(), cfg, cc, prompt)
+		return textResultMsg{title: title, body: body, err: err}
+	}
+}
+
+func (m *Model) runSlash(cmd string) tea.Cmd {
 	name, arg, _ := strings.Cut(strings.TrimSpace(cmd), " ")
 	arg = strings.TrimSpace(arg)
 
 	switch name {
+	// The three "which one?" commands never ask you to type a name — they
+	// open a picker showing what is actually available.
 	case "/context", "/ctx":
-		if arg == "" {
-			m.ctxIdx = (m.ctxIdx + 1) % len(mock.Contexts)
-		} else {
-			for i, c := range mock.Contexts {
-				if strings.Contains(c, arg) {
-					m.ctxIdx = i
-					break
-				}
-			}
-		}
-		mock.Cluster.Context = mock.Contexts[m.ctxIdx]
-		m.saveConfig()
-		m.toast = "context → " + mock.Cluster.Context
-	case "/ns", "/namespace":
-		cyc := mock.NamespaceCycle()
-		switch {
-		case arg == "":
-			cur := 0
-			for i, n := range cyc {
-				if n == mock.Cluster.Namespace {
-					cur = i
-				}
-			}
-			mock.Cluster.Namespace = cyc[(cur+1)%len(cyc)]
-		case strings.EqualFold(arg, mock.AllNamespaces):
-			mock.Cluster.Namespace = mock.AllNamespaces
-		default:
-			mock.Cluster.Namespace = arg
-		}
-		m.rowIdx, m.rowScroll = 0, 0
-		m.saveConfig()
-		label := mock.Cluster.Namespace
-		if label == mock.AllNamespaces {
-			label = "all namespaces"
-		}
-		m.toast = "namespace → " + label
-	case "/theme":
-		if arg == "" {
-			m.themeIdx = (m.themeIdx + 1) % len(theme.Themes)
-		} else {
-			for i, t := range theme.Themes {
-				if strings.Contains(t.Name, arg) {
-					m.themeIdx = i
-					break
-				}
-			}
-		}
-		m.saveConfig()
-		m.toast = "theme → " + m.th().Name
-	case "/config":
-		m.cfgOpen = true
-		m.cfgRow = 0
 		m.closePrompt()
-		return
-	case "/ai":
-		if arg == "" {
-			m.toast = "usage: /ai <prompt>"
-		} else {
-			m.showText("ai ✦ "+trunc(arg, 48), mock.AIAnswer(arg))
+		m.showContextChooser()
+		return nil
+	case "/ns", "/namespace":
+		m.closePrompt()
+		m.showNamespaceChooser()
+		return nil
+	case "/theme":
+		m.openThemePicker()
+		m.closePrompt()
+		return nil
+	case "/settings":
+		m.openSettings()
+		m.closePrompt()
+		return nil
+	case ":mouse":
+		m.closePrompt()
+		return m.toggleMouse()
+
+	case ":scale":
+		n, err := strconv.Atoi(arg)
+		if err != nil || n < 0 {
+			m.toast = "usage: /scale <replicas>"
+			m.closePrompt()
+			return nil
 		}
-	case "/search":
+		kind, ns, rname := m.curKind().Key, m.curNamespace(), m.curName()
+		m.closePrompt()
+		return m.runAction(fmt.Sprintf("✓ %s scaled to %d", rname, n), func() error {
+			_, err := m.src.Scale(kind, ns, rname, n)
+			return err
+		})
+	case ":search":
 		m.search = arg
 		m.applySearch()
-		m.focus = focusList
+		m.focus = focusMain
 		m.input.Blur()
 		m.toast = "filter: " + arg
-		return
-	case "/filter":
+		return nil
+	case ":filter":
 		m.rowSearch = arg
 		m.resetRowSelection()
 		m.focus = focusMain
@@ -883,22 +1825,19 @@ func (m *Model) runSlash(cmd string) {
 		} else {
 			m.toast = "row filter: " + arg
 		}
-		return
-	case "/crd":
-		m.jumpToResource("crds")
-	case "/dr":
-		m.jumpToResource("customresources")
+		return nil
 	case "/help":
-		m.showText("help", mock.Help())
+		m.showText("help", Help())
 	default:
 		m.toast = "unknown command " + name + " — /help lists everything"
 	}
 	m.closePrompt()
+	return nil
 }
 
 // jumpToResource selects a resource kind by its Key, used by /crd and /dr.
 func (m *Model) jumpToResource(key string) {
-	for i, r := range mock.Resources {
+	for i, r := range m.kinds() {
 		if r.Key == key {
 			m.selectResource(i)
 			m.focus = focusMain
@@ -908,14 +1847,14 @@ func (m *Model) jumpToResource(key string) {
 }
 
 // suggestions returns slash commands matching the current input.
-func (m *Model) suggestions() []mock.SlashCommand {
+func (m *Model) suggestions() []SlashCommand {
 	v := m.input.Value()
-	if m.focus != focusPrompt || !strings.HasPrefix(v, "/") {
+	if m.focus != focusPrompt || v == "" || !isCommandPrefix(v[0]) {
 		return nil
 	}
 	head, _, _ := strings.Cut(v, " ")
-	var out []mock.SlashCommand
-	for _, c := range mock.SlashCommands {
+	var out []SlashCommand
+	for _, c := range commandsFor(v[0]) {
 		if strings.HasPrefix(c.Name, head) {
 			out = append(out, c)
 		}
@@ -929,13 +1868,41 @@ func (m *Model) suggestions() []mock.SlashCommand {
 // ---- mouse ----------------------------------------------------------------
 
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if msg.Button == tea.MouseButtonWheelUp {
-		m.move(-2)
+	// Track what the pointer is over so the Actions pane can show a hover
+	// highlight. Motion events arrive constantly; this must stay trivial.
+	if !m.modalOpen() {
+		m.hoverAct = ""
+		for _, a := range Actions {
+			if zone.Get("act:" + a.ID).InBounds(msg) {
+				m.hoverAct = a.ID
+				break
+			}
+		}
+	}
+
+	wheel := 0
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		wheel = -1
+	case tea.MouseButtonWheelDown:
+		wheel = 1
+	}
+
+	// An open popup owns the wheel. Letting it fall through to the pane
+	// underneath meant scrolling a picker quietly moved the table behind
+	// it — the list you were looking at stayed put and the wrong thing
+	// changed.
+	if wheel != 0 && m.modalOpen() {
+		m.scrollModal(wheel)
 		return nil
 	}
-	if msg.Button == tea.MouseButtonWheelDown {
-		m.move(2)
-		return nil
+
+	// Otherwise the wheel scrolls whatever the pointer is over, not whatever
+	// has keyboard focus — hovering a pane to scroll it shouldn't first
+	// require clicking into it.
+	if wheel != 0 {
+		m.scrollPaneAt(msg.X, msg.Y, wheel*2)
+		return m.maybeLoadOlder()
 	}
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return nil
@@ -946,7 +1913,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			cb := m.confirm.onOK
 			m.confirm = nil
 			if cb != nil {
-				cb(m)
+				return cb(m)
 			}
 		} else if zone.Get("cf:no").InBounds(msg) {
 			m.confirm = nil
@@ -955,18 +1922,46 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	if m.cfgOpen {
-		if zone.Get("cfg:openai").InBounds(msg) {
+	if m.palOpen {
+		for i := range m.paletteHits() {
+			if zone.Get(fmt.Sprintf("pal:%d", i)).InBounds(msg) {
+				m.palIdx = i
+				m.gotoHit(m.paletteHits()[i])
+				return nil
+			}
+		}
+		return nil
+	}
+
+	if m.setOpen {
+		switch {
+		case zone.Get("set:save").InBounds(msg):
+			return m.closeSettings()
+		case zone.Get("set:openai").InBounds(msg):
 			m.setProvider(0)
-		} else if zone.Get("cfg:anthropic").InBounds(msg) {
+			return nil
+		case zone.Get("set:anthropic").InBounds(msg):
 			m.setProvider(1)
-		} else if zone.Get("cfg:close").InBounds(msg) {
-			m.cfgOpen = false
-		} else {
-			for i := 0; i < 4; i++ {
-				if zone.Get(fmt.Sprintf("cfg:row:%d", i)).InBounds(msg) {
-					m.cfgRow = i
-				}
+			return nil
+		}
+		for i := 0; i < setRows(); i++ {
+			if zone.Get(fmt.Sprintf("set:%d", i)).InBounds(msg) {
+				m.setRow = i
+				return m.activateSettingRow()
+			}
+		}
+		return nil
+	}
+
+	if m.themeOpen {
+		if zone.Get("thm:save").InBounds(msg) {
+			return m.saveTheme()
+		}
+		for i := range theme.Themes {
+			if zone.Get(fmt.Sprintf("thm:%d", i)).InBounds(msg) {
+				m.themeRow = i
+				m.themeSave = false
+				m.previewTheme()
 			}
 		}
 		return nil
@@ -974,8 +1969,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	for i, c := range m.suggestions() {
 		if zone.Get(fmt.Sprintf("sug:%d", i)).InBounds(msg) {
-			m.input.SetValue(c.Name + " ")
-			m.input.CursorEnd()
+			m.acceptSuggestion(c)
 			return nil
 		}
 	}
@@ -988,10 +1982,21 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		m.mode = modeTable
 		return nil
 	}
+	if zone.Get("nsbtn").InBounds(msg) {
+		m.showNamespaceChooser()
+		return nil
+	}
 	if zone.Get("theme").InBounds(msg) {
-		m.themeIdx = (m.themeIdx + 1) % len(theme.Themes)
-		m.toast = "theme → " + m.th().Name
-		m.saveConfig()
+		// The same live-preview picker /theme opens — cycling blind through
+		// seven themes to find one was never the nice way to choose.
+		m.openThemePicker()
+		return nil
+	}
+	if zone.Get("promptzoom").InBounds(msg) {
+		m.promptZoom = !m.promptZoom
+		if m.focus != focusPrompt {
+			return m.openPrompt("")
+		}
 		return nil
 	}
 	if zone.Get("aimode").InBounds(msg) {
@@ -1002,10 +2007,6 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		m.focus = focusPrompt
 		return m.input.Focus()
 	}
-	if zone.Get("searchbox").InBounds(msg) {
-		m.focus = focusList
-		return nil
-	}
 	if zone.Get("tablesearch").InBounds(msg) {
 		if m.mode == modeTable {
 			m.focus = focusMainSearch
@@ -1013,29 +2014,51 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	for i := range mock.Resources {
+	for i := range m.kinds() {
 		if zone.Get(fmt.Sprintf("res:%d", i)).InBounds(msg) {
-			m.focus = focusList
+			// Selecting a kind, not the pane: focus stays where it was.
 			m.selectResource(i)
 			return nil
 		}
 	}
+	if m.mode == modeContexts {
+		for i := range m.ctxChoices() {
+			if zone.Get(fmt.Sprintf("ctxp:%d", i)).InBounds(msg) {
+				m.ctxIdx = i
+				return m.chooseContext()
+			}
+		}
+		return nil
+	}
+
 	_, curRows := m.tableData()
 	for i := range curRows {
 		if zone.Get(fmt.Sprintf("row:%d", i)).InBounds(msg) {
 			m.focus = focusMain
 			m.rowIdx = i
-			m.rowMem[m.res().Key] = i
+			m.rowMem[m.curKind().Key] = i
+
+			// A second click on the same row within the double-click window
+			// opens it, same as enter.
+			now := time.Now()
+			double := m.lastClickRow == i && now.Sub(m.lastClickAt) < doubleClickWindow
+			m.lastClickRow, m.lastClickAt = i, now
+			if double {
+				m.lastClickAt = time.Time{} // don't let a triple click re-fire
+				return m.openSelected()
+			}
 			return nil
 		}
 	}
-	for _, a := range mock.Actions {
+	for _, a := range Actions {
 		if zone.Get("act:" + a.ID).InBounds(msg) {
-			m.focus = focusActions
-			m.fireAction(a)
-			return nil
+			return tea.Batch(m.flashAction(a.ID), m.fireAction(a))
 		}
 	}
+
+	// Nothing specific was hit, so treat the click as "work here": clicking
+	// blank space inside a pane still selects that pane.
+	m.focusPaneAt(msg.X, msg.Y)
 	return nil
 }
 
@@ -1061,8 +2084,15 @@ func maxi(a, b int) int {
 // mark wraps content for mouse hit-testing, disabled while a modal is up so
 // the overlay never slices a marker in half.
 func (m *Model) mark(id, s string) string {
-	if m.confirm != nil || m.cfgOpen {
+	if m.modalOpen() {
 		return s
 	}
 	return zone.Mark(id, s)
+}
+
+// modalOpen reports whether anything is overlaid on the main frame. While one
+// is, background zones are not marked so an overlay can never slice a
+// bubblezone marker in half.
+func (m *Model) modalOpen() bool {
+	return m.confirm != nil || m.setOpen || m.themeOpen || m.palOpen
 }

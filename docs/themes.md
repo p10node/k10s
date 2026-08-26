@@ -1,7 +1,13 @@
 # Themes
 
-Cycle with `T` / `ctrl+t`, jump with `/theme <name>`, or click the
-`theme <name> ⟳` label in the banner.
+Four ways in: `T` / `ctrl+t` cycles, `/theme <name>` jumps straight to one,
+clicking the `theme <name> ⟳` label in the banner cycles, and bare `/theme`
+opens the **picker**.
+
+The picker shows each theme with a swatch of its own colors and applies the
+highlighted one **immediately**, so you judge it on the real UI rather than
+from a name. `tab` reaches the Save button, `enter` commits from anywhere,
+and `esc` restores whatever was active before you opened it.
 
 | # | Name               | Notes            |
 |---|--------------------|------------------|
@@ -31,4 +37,6 @@ type Theme struct {
 
 Every render derives colors from the active theme — there are no hardcoded
 colors in `internal/ui`. Adding a theme = appending one struct to
-`theme.Themes`; it immediately appears in the `T` cycle and `/theme`.
+`theme.Themes`; it immediately appears in the `T` cycle, in `/theme`, and in
+the picker (whose swatch is generated from the palette, so nothing else needs
+touching).

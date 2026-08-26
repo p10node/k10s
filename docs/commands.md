@@ -3,69 +3,106 @@
 The bottom panel has two modes, toggled with `ctrl+a` or by clicking the
 right-hand tag:
 
-- **CMD ❯** — plain text is treated as a kubectl command (mock: echoes it and
-  jumps to a resource if one is named). Slash commands work.
-- **AI ✦** — plain text goes to the configured model; the answer opens as a
-  text view in the main pane (scroll/zoom/close like describe). Slash
-  commands still work in this mode.
+- **CMD ❯** — commands run; anything else is echoed as
+  `$ <cli> <text>` and jumps to a resource if one is named. k10s does not
+  shell out to run arbitrary kubectl commands — the echo is a read-only
+  convenience, and `<cli>` is whatever name you picked in `/settings`.
+- **AI ✦** — plain text goes to the configured model over HTTP; the answer
+  opens as a text view in the main pane (scroll/zoom/close like describe).
+  Commands still work in this mode.
 
-## Slash commands
+## Search palette (`ctrl+p`)
 
-Typing `/` shows a suggestion popup filtered by prefix; click a row to fill.
-Note: typing bare `/` (no `:` first) while the main pane is focused on a
-table instead activates that table's own row-search box — see
-[ui.md](ui.md#main-pane-center). Prefix with `:` to always reach the prompt
-regardless of focus.
+One box that finds both resource kinds and individual objects. Kinds you have
+opened are searched by object name; kinds not yet loaded match by name only,
+because scanning their objects would mean starting a cluster-wide watch per
+kind. The footer states how many kinds are in that reduced state.
 
-| Command    | Args       | Effect                                                  |
-|------------|------------|----------------------------------------------------------|
-| `/context` | `[name]`   | switch kube context — no arg cycles the known list      |
-| `/ns`      | `[name]`   | switch namespace — `all` shows every namespace at once; no arg cycles |
-| `/theme`   | `[name]`   | switch theme — no arg cycles                             |
-| `/config`  |            | open AI settings modal                                   |
-| `/ai`      | `<prompt>` | one-shot AI question regardless of mode                  |
-| `/search`  | `<term>`   | filter the resource list (left pane, by kind)             |
-| `/filter`  | `<term>`   | filter rows of the table currently open (main pane)        |
-| `/crd`     |            | jump to CustomResourceDefinitions                         |
-| `/dr`      |            | jump to Custom Resource instances                          |
-| `/help`    |            | keybindings + commands text view                          |
+`↑↓` moves, `enter` jumps to the kind (and row), `esc` closes.
+
+Cmd+K cannot be bound to this — see [keybindings.md](keybindings.md#search).
+
+## Two command prefixes
+
+- **`/` — open a chooser.** Namespace, context, theme, settings, help.
+- **`:` — act on what is on screen**, usually with an argument. Search,
+  filter, scale, mouse capture.
+
+Typing either prefix pre-fills it and shows only that set. `↑↓` moves the
+highlight and **`enter` runs the highlighted command straight away** — no
+second trip through the prompt. The exception is a command still missing its
+argument (`:scale`, `:search`, `:filter`), where enter completes it instead
+so the argument can be typed. `tab` always completes rather than runs.
+
+| Command     | Args     | Effect                                                       |
+|-------------|----------|--------------------------------------------------------------|
+| `/ns`       |          | choose a namespace — opens the Namespaces table              |
+| `/context`  |          | choose a kube context — opens a picker; switching reconnects |
+| `/theme`    |          | theme picker with live preview                               |
+| `/settings` |          | CLI name **and** AI provider, in one dialog                  |
+| `/scale`    | `<n>`    | scale the selected deployment/statefulset                    |
+| `/help`     |          | keybindings + commands text view                             |
+| `:search`   | `<term>` | filter the resource list (left pane, by kind)                |
+| `:filter`   | `<term>` | filter rows of the table currently open (main pane)          |
+| `:mouse`    |          | toggle mouse capture — same as `ctrl+s`                      |
 
 Unknown commands toast `unknown command … — /help lists everything`.
 
+**None of `/ns`, `/context` or `/theme` takes a name.** Each opens a chooser
+showing what is actually available.
+
+## Growing the command box
+
+`ctrl+z` grows the prompt to half the screen, and typing anything that is
+not a `/` or `:` command grows it automatically — a kubectl line or an AI
+question gets long, and a one-row field that scrolls sideways hides most of
+it. The value wraps across the tall box so the whole thing is readable.
+`esc` shrinks it; `esc` again leaves the prompt. There is a `[ grow ]` /
+`[ shrink ]` button in the panel's top border too.
+
 ## Namespaces
 
-`mock.Cluster.Namespace` is one of: a specific namespace name, or the
-sentinel `all`. `/ns` (no argument) cycles through every namespace the mock
-knows about — `default`, `kube-system`, `monitoring`, `staging`, `argocd`,
-`cert-manager` — and ends on `all`; `/ns <name>` jumps straight there,
-case-insensitively matching `all`.
+The active namespace is a specific name or the sentinel `all`. There is one
+route to change it, reachable two ways — the **`ns <name> ▾` button** in the
+top-right of the banner, or **`/ns`**. Both open the **Namespaces table in
+the main panel**, whose first row is `all`. Pressing `enter` on a row
+switches to that namespace *and* jumps to its Pods, which is the usual next
+step.
 
 What changes when you switch:
-- **A specific namespace** (including `default`) — the table shows only rows
-  tagged with that namespace. Most kinds only have data under `default`;
-  `kube-system`/`monitoring`/`staging` show a handful of cross-namespace
-  extras (coredns, grafana, a staging deploy in CrashLoopBackOff…) added
-  specifically to make switching namespaces show something different.
-  `argocd`/`cert-manager` only have Custom Resource instances.
-- **`all`** — every row from every namespace, with a NAMESPACE column
-  prepended (accent2-colored) — same idea as `kubectl get pods -A`.
+- **A specific namespace** — the table shows only that namespace's rows.
+- **`all`** — every row, with a NAMESPACE column prepended (accent2-colored),
+  the same idea as `kubectl get pods -A`. Rows group by namespace, then name.
 - Every Resources-pane badge count updates too, not just the open table.
 - Non-namespaced kinds (Nodes, Namespaces, CRDs) ignore the filter entirely.
+- The row cursor resets to the top, since the row set changed completely.
 
-This is real filtering over mock data (see mock-data.md), not just a label —
-switching namespace changes which rows exist, matching how the real thing
-will behave once client-go is wired in.
+## CLI name (`/settings`)
 
-## AI settings (`/config`)
+k10s asks once, on first run, which command you type for Kubernetes —
+`kubectl`, `k8s`, `k`, or your own — and uses it in command echoes and hints.
+It is cosmetic: k10s talks to the API directly and never executes it.
+Reopen the picker any time with `/settings`; it is stored as `cli:` in
+[config.md](config.md).
+
+## AI settings (`/settings`)
 
 | Field    | Notes                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|
 | Provider | radio: **OpenAI-compatible** / **Anthropic**; switching auto-fills that provider's default Base URL + Model |
 | Base URL | e.g. `https://api.anthropic.com/v1` — inline editable                                                       |
 | Model    | e.g. `claude-sonnet-5` / `gpt-5` — inline editable                                                          |
-| API Key  | inline editable, always displayed masked (`sk-ant-api••••7f2a`)                                             |
+| API Key  | inline editable, always displayed masked                                                                    |
 
-Every field is persisted to `~/.k10s/config.yaml` as soon as you commit an
-edit (enter) or toggle the provider — see [config.md](config.md). The AI
-*answer* itself is still mock-only (`mock.AIAnswer`, no network call);
-persistence covers settings, not inference.
+`↑↓` moves, `enter` selects a radio or starts editing a field, `tab` reaches
+**Save**, `esc` closes keeping what is set. Every field is persisted as soon
+as you commit an edit or toggle the provider — see [config.md](config.md).
+
+The API key field never pre-fills with the stored secret; leaving it empty
+keeps the existing key rather than clearing it.
+
+Requests are real (`internal/ai`): OpenAI-compatible posts to
+`/chat/completions` with a Bearer token, Anthropic posts to `/messages` with
+`x-api-key` + `anthropic-version`. The current context, namespace, resource
+kind and selected object are injected into the system prompt so answers can
+refer to what's on screen. Errors surface the server's own message.
