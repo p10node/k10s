@@ -130,6 +130,25 @@ release:
     (cd dist && (sha256sum {{binary}}_* 2>/dev/null || shasum -a 256 {{binary}}_*) > checksums.txt)
     ls -lh dist
 
+# Smoke-test install.sh and uninstall.sh against the published releases, in a
+# throwaway directory with a throwaway HOME — never touches /usr/local/bin or
+# your real ~/.k10s. Both piped paths are exercised too, since no-TTY is what
+# real users hit (no TTY → no sudo prompt, no confirmation prompt).
+test-install dir="/tmp/k10s-install-test":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf {{dir}}; mkdir -p {{dir}}/bin {{dir}}/home/.k10s
+    sh install.sh --dir {{dir}}/bin
+    {{dir}}/bin/{{binary}} --version
+    cat install.sh | sh -s -- --dir {{dir}}/bin
+    echo "theme: dracula" > {{dir}}/home/.k10s/config.yaml
+    HOME={{dir}}/home PATH="{{dir}}/bin:$PATH" sh uninstall.sh --dry-run
+    HOME={{dir}}/home PATH="{{dir}}/bin:$PATH" sh uninstall.sh -y --purge
+    [ ! -e {{dir}}/bin/{{binary}} ] || { echo "binary survived uninstall"; exit 1; }
+    [ ! -e {{dir}}/home/.k10s ] || { echo "--purge left the config behind"; exit 1; }
+    HOME={{dir}}/home sh uninstall.sh --dir {{dir}}/bin   # nothing left to remove
+    rm -rf {{dir}}
+
 # Tag this commit and push it; the release workflow publishes the build.
 tag ver:
     git tag -a {{ver}} -m "k10s {{ver}}"

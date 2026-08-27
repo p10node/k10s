@@ -76,6 +76,19 @@ falls back to the demo only if that fails.
 ## Install
 
 ```bash
+curl -fsSL https://p10node.com/k10s/install.sh | sh
+```
+
+macOS and Linux, `amd64` and `arm64`. It picks the right prebuilt binary,
+verifies its sha256 against the release manifest, and installs it into
+`/usr/local/bin` (or `~/.local/bin` when that needs a password it cannot
+ask for). `--dir`, `--version` and `--no-sudo` are in [docs/install.md](docs/install.md),
+along with how to read it before you run it and the matching
+`uninstall.sh`.
+
+With Go on the box:
+
+```bash
 go install github.com/p10node/k10s@latest
 ```
 
@@ -86,9 +99,11 @@ git clone https://github.com/p10node/k10s && cd k10s
 just install                 # → $GOBIN/k10s, version-stamped
 ```
 
-Once a release is tagged, prebuilt static binaries for **darwin/amd64,
-darwin/arm64, linux/amd64, linux/arm64 and windows/amd64** are published
-automatically, and every later upgrade is just:
+Prebuilt static binaries for **darwin/amd64, darwin/arm64, linux/amd64,
+linux/arm64 and windows/amd64** are published on every tag — Windows is the
+one platform the installer script sends to the
+[release page](https://github.com/p10node/k10s/releases) instead. Every later
+upgrade is just:
 
 ```bash
 k10s update
