@@ -102,9 +102,9 @@ func TestThemeAndContextCommandsOpenPickers(t *testing.T) {
 	}
 	m.themeOpen = false
 
-	m.runSlash("/context")
+	m.runSlash(":ctx")
 	if m.mode != modeContexts {
-		t.Error("/context should show the context list in the main panel")
+		t.Error(":ctx should show the context list in the main panel")
 	}
 }
 
@@ -392,14 +392,14 @@ func TestEnterRunsOnceTheArgumentIsThere(t *testing.T) {
 // ---- removed commands ----------------------------------------------------
 
 func TestRemovedCommandsAreGone(t *testing.T) {
-	for _, name := range []string{"/ai", "/crd", "/dr", ":config", ":settings", ":theme", ":help"} {
+	for _, name := range []string{"/ai", "/crd", "/dr", "/ns", "/context", ":config", ":settings", ":theme", ":help"} {
 		for _, c := range SlashCommands {
 			if c.Name == name {
 				t.Errorf("%q should have been removed or moved", name)
 			}
 		}
 	}
-	for _, name := range []string{"/settings", "/theme", "/help", "/ns", "/context"} {
+	for _, name := range []string{"/settings", "/theme", "/help", "/update", "/version"} {
 		found := false
 		for _, c := range SlashCommands {
 			if c.Name == name {
@@ -413,7 +413,7 @@ func TestRemovedCommandsAreGone(t *testing.T) {
 }
 
 func TestRemovedCommandsToastUnknown(t *testing.T) {
-	for _, cmd := range []string{"/ai hello", "/crd", "/dr"} {
+	for _, cmd := range []string{"/ai hello", "/crd", "/dr", "/ns", "/context"} {
 		m := newTestModel(t, mock.New(""))
 		dismissOnboarding(m)
 		m.runSlash(cmd)
@@ -623,5 +623,43 @@ func TestZoomedPromptWrapsTheCommand(t *testing.T) {
 	joined := stripANSI(strings.Join(body, "\n"))
 	if !strings.Contains(joined, "some-very-long-name") {
 		t.Error("the zoomed prompt should show the wrapped command text")
+	}
+}
+
+// Namespace and context live under ":" — they name things the cluster has,
+// like every other ":" command, and that is where a k9s user reaches for
+// them. Nothing about the cluster is left under "/".
+func TestNamespaceAndContextAreColonCommands(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+
+	m.runSlash(":ns")
+	if m.curKind().Key != "namespaces" {
+		t.Errorf(":ns → %q, want the Namespaces table", m.curKind().Key)
+	}
+	m.runSlash(":ctx")
+	if m.mode != modeContexts {
+		t.Error(":ctx should open the context list")
+	}
+
+	for _, gone := range []string{"/ns", "/context", "/ctx", "/namespace"} {
+		m2 := newTestModel(t, mock.New(""))
+		dismissOnboarding(m2)
+		m2.runSlash(gone)
+		if m2.curKind().Key == "namespaces" || m2.mode == modeContexts {
+			t.Errorf("%s still works — it moved to the : prefix", gone)
+		}
+		if !strings.Contains(m2.toast, "unknown command") {
+			t.Errorf("%s: toast = %q, want an unknown-command message", gone, m2.toast)
+		}
+	}
+
+	// The "/" set is k10s's own settings and nothing else.
+	for _, c := range clusterCommands {
+		switch c.Name {
+		case "/theme", "/settings", "/update", "/version", "/help":
+		default:
+			t.Errorf("%q is under / but is not one of k10s's own settings", c.Name)
+		}
 	}
 }

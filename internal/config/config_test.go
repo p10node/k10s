@@ -24,12 +24,14 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	t.Setenv("K10S_CONFIG", path)
 
 	want := Config{
-		Theme:     "tokyo-night",
-		Context:   "kind-dev",
-		Namespace: "kube-system",
-		CLI:       "k",
-		CLIs:      []string{"kubectl", "k8s", "k"},
-		Onboarded: true,
+		Theme:        "tokyo-night",
+		Context:      "kind-dev",
+		Namespace:    "kube-system",
+		CLI:          "k",
+		CLIs:         []string{"kubectl", "k8s", "k"},
+		Onboarded:    true,
+		Collapsed:    []string{"Config", "RBAC"},
+		CollapsedSet: true,
 		AI: AI{
 			Provider: "anthropic",
 			BaseURL:  "https://api.anthropic.com/v1",
@@ -146,5 +148,40 @@ func TestNestedSectionsDoNotBleedIntoEachOther(t *testing.T) {
 	}
 	if got.AI != want.AI || got.Update != want.Update {
 		t.Errorf("got ai=%+v update=%+v, want ai=%+v update=%+v", got.AI, got.Update, want.AI, want.Update)
+	}
+}
+
+// A saved file always carries the "collapsed" key, so opening every group is
+// remembered as such instead of being read back as "never chosen" — which is
+// what would let the defaults re-fold groups the user deliberately opened.
+func TestCollapsedNoneIsDistinctFromUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("K10S_CONFIG", path)
+
+	if err := Save(Config{Theme: "tokyo-night"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got.Collapsed) != 0 {
+		t.Errorf("Collapsed = %v, want none", got.Collapsed)
+	}
+	if !got.CollapsedSet {
+		t.Error("CollapsedSet = false — a written file always states the choice")
+	}
+
+	// A config from before the key existed must read as unset, so the
+	// defaults still apply on the first run after an upgrade.
+	if err := os.WriteFile(path, []byte("theme: \"gruvbox\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if old.CollapsedSet {
+		t.Error("a config without the key should read as unset")
 	}
 }

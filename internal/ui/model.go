@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -74,7 +75,11 @@ type confirmState struct {
 	title   string
 	message []string
 	danger  bool
-	onOK    func(*Model) tea.Cmd
+	// notice means there is nothing to decide — the modal is only telling
+	// you something, so it gets one button and dismissing it isn't a
+	// "cancelled" anything.
+	notice bool
+	onOK   func(*Model) tea.Cmd
 }
 
 type aiConfig struct {
@@ -93,11 +98,21 @@ type Model struct {
 	themeIdx int
 	focus    focusPane
 
-	resIdx    int
-	search    string
-	rowIdx    int
-	rowScroll int
-	rowSearch string // filters rows of the currently displayed table
+	resIdx int
+	search string
+	// collapsed folds a Resources-pane group away. Groups you rarely touch
+	// start folded (defaultCollapsedGroups): thirty kinds do not fit on a
+	// laptop-sized sidebar, and a folded group also costs no badge requests
+	// — the backend only counts kinds that are actually drawn.
+	collapsed map[string]bool
+	// listScroll is the Resources pane's own scroll offset, in rendered
+	// lines. Scrolling it never moves the selection — the wheel is for
+	// looking around, and a kind list that reselected as it slid past would
+	// change the whole main panel by accident.
+	listScroll int
+	rowIdx     int
+	rowScroll  int
+	rowSearch  string // filters rows of the currently displayed table
 
 	mode      mainMode
 	textTitle string
@@ -120,12 +135,15 @@ type Model struct {
 	cli  string
 	clis []string
 
-	// One settings modal: CLI name + AI provider. Also serves as first-run
-	// onboarding, which is what `onboarded` distinguishes.
+	// One settings modal: CLI name + AI provider + the update check.
 	setOpen    bool
 	setRow     int
 	setEditing bool
-	onboarded  bool
+	// onboarded records that k10s has been run before; firstRun is that
+	// same fact for this session, so the status bar can point at /settings
+	// once instead of a dialog doing it every time.
+	onboarded bool
+	firstRun  bool
 
 	// themePicker: live-previewing theme chooser opened by /theme.
 	themeOpen bool
@@ -140,7 +158,7 @@ type Model struct {
 	palOpen bool
 	palIdx  int
 
-	// context picker, opened by /context.
+	// context picker, opened by :ctx.
 	ctxOpen   bool
 	ctxIdx    int
 	ctxFilter string
@@ -183,8 +201,7 @@ type Model struct {
 	// therefore copy) works.
 	mouseOff bool
 
-	initialCtx string
-	// nsPinned marks a namespace that came from config, so the first
+	// nsPinned marks a namespace restored from config, so the first
 	// connection doesn't overwrite it with the context's own default.
 	nsPinned bool
 
@@ -241,6 +258,7 @@ func New(src domain.Source) *Model {
 		focus:     focusMain,
 		input:     ti,
 		rowMem:    map[string]int{},
+		collapsed: map[string]bool{},
 		portFwds:  map[string]func(){},
 		cli:       config.DefaultCLI,
 		clis:      append([]string(nil), config.CLIPresets...),
@@ -270,10 +288,12 @@ func (m *Model) loadConfig() {
 			}
 		}
 	}
-	if c.Context != "" && c.Context != m.src.ClusterInfo().Context {
-		m.initialCtx = c.Context
-	}
-	if c.Namespace != "" {
+	// k10s always opens on kubeconfig's current-context — the cluster the
+	// kubectl in the next terminal is talking to. The saved context is not
+	// a "connect here" pin; it records which context the saved namespace
+	// belongs to, so that namespace comes back only when you are on that
+	// same cluster and never leaks onto another one.
+	if c.Namespace != "" && c.Context == m.src.ClusterInfo().Context {
 		m.namespace = c.Namespace
 		m.nsPinned = true
 	}
@@ -295,12 +315,25 @@ func (m *Model) loadConfig() {
 	if len(c.CLIs) > 0 {
 		m.clis = c.CLIs
 	}
+	if c.CollapsedSet {
+		m.collapsed = map[string]bool{}
+		for _, g := range c.Collapsed {
+			m.collapsed[g] = true
+		}
+	} else {
+		m.collapsed = defaultCollapsed()
+	}
 	m.applyUpdateConfig(c.Update)
 	m.onboarded = c.Onboarded
-	// First run (or a config predating the CLI setting): show the settings
-	// screen so the user picks a CLI name before anything else.
+	// First run opens straight into the cluster. A settings dialog in front
+	// of the thing you launched is a form to dismiss before you can look at
+	// anything, and every field in it has a working default — the CLI name
+	// is a label, the AI block is optional, the update check is on. The
+	// status bar says where to find it instead.
 	if !c.Onboarded {
-		m.openSettings()
+		m.onboarded = true
+		m.firstRun = true
+		m.saveConfig()
 	}
 }
 
@@ -308,11 +341,12 @@ func (m *Model) loadConfig() {
 // never interrupt the UI.
 func (m *Model) saveConfig() {
 	providers := []string{"openai", "anthropic"}
-	// While connecting, ClusterInfo is the placeholder's — saving it would
-	// pin a context we haven't reached yet, so keep whatever config holds.
+	// The context is saved as the namespace's address — which cluster it was
+	// chosen on — so while a switch is in flight the one being switched *to*
+	// is what the namespace will belong to.
 	ctx := m.src.ClusterInfo().Context
-	if m.connecting {
-		ctx = m.initialCtx
+	if m.connecting && m.connName != "" {
+		ctx = m.connName
 	}
 	err := config.Save(config.Config{
 		Theme:     m.th().Name,
@@ -321,6 +355,9 @@ func (m *Model) saveConfig() {
 		CLI:       m.cli,
 		CLIs:      m.clis,
 		Onboarded: m.onboarded,
+		// Always written, even when nothing is folded — see config.Config.
+		Collapsed:    m.collapsedGroups(),
+		CollapsedSet: true,
 		AI: config.AI{
 			Provider: providers[m.cfg.provider],
 			BaseURL:  m.cfg.url,
@@ -351,6 +388,187 @@ func (m *Model) curKind() domain.Kind {
 func (m *Model) res() domain.Kind { return m.curKind() }
 
 // filtered returns kind indices matching the search box.
+// defaultCollapsedGroups are folded on first run. Workloads, Network and
+// Cluster are what people open k10s for; the rest are looked up occasionally,
+// and unfolding one is a click.
+var defaultCollapsedGroups = []string{"Config", "Storage", "RBAC"}
+
+func defaultCollapsed() map[string]bool {
+	out := make(map[string]bool, len(defaultCollapsedGroups))
+	for _, g := range defaultCollapsedGroups {
+		out[g] = true
+	}
+	return out
+}
+
+// collapsedGroups is the folded set, in kind-list order so the config file
+// doesn't churn between saves.
+func (m *Model) collapsedGroups() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range m.kinds() {
+		if !seen[k.Group] && m.collapsed[k.Group] {
+			seen[k.Group] = true
+			out = append(out, k.Group)
+		}
+	}
+	return out
+}
+
+// groupOrder lists the sidebar's groups once each, in the order the kinds
+// declare them.
+func (m *Model) groupOrder() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range m.kinds() {
+		if !seen[k.Group] {
+			seen[k.Group] = true
+			out = append(out, k.Group)
+		}
+	}
+	return out
+}
+
+// groupKinds returns the indices of every kind in a group, folded or not.
+func (m *Model) groupKinds(group string) []int {
+	var out []int
+	for i, k := range m.kinds() {
+		if k.Group == group {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// toggleGroup folds or unfolds one group and remembers the choice.
+func (m *Model) toggleGroup(group string) {
+	if m.collapsed == nil {
+		m.collapsed = map[string]bool{}
+	}
+	m.collapsed[group] = !m.collapsed[group]
+	if m.collapsed[group] {
+		m.toast = "▸ " + group + " folded"
+	} else {
+		m.toast = "▾ " + group
+	}
+	m.syncListScroll()
+	m.saveConfig()
+}
+
+// listEntry is one rendered line of the Resources pane: a group header, a
+// blank separator, or a kind row. The pane is built from this skeleton
+// twice — once to draw it, once to work out where the selection and the
+// scroll window sit — so the two can never disagree about which line is
+// which.
+type listEntry struct {
+	group  string // non-empty on a group header
+	folded bool   // that header's state
+	kind   int    // index into kinds(); -1 on headers and blanks
+}
+
+func (m *Model) listEntries() []listEntry {
+	searching := m.search != ""
+	ks := m.kinds()
+
+	var out []listEntry
+	group := ""
+	prevFolded := false
+	for _, i := range m.filtered() {
+		r := ks[i]
+		if r.Group != group {
+			group = r.Group
+			folded := !searching && m.collapsed[group]
+			// One blank line separates groups, except between two folded
+			// ones: three headers with a gap each is more air than the two
+			// words they separate deserve.
+			if len(out) > 0 && !(prevFolded && folded) {
+				out = append(out, listEntry{kind: -1})
+			}
+			prevFolded = folded
+			out = append(out, listEntry{group: group, folded: folded, kind: -1})
+		}
+		if !searching && m.collapsed[r.Group] {
+			continue
+		}
+		out = append(out, listEntry{kind: i})
+	}
+	return out
+}
+
+// listRows is how many lines of the Resources pane are on screen.
+func (m *Model) listRows() int {
+	return maxi(1, m.layout().midH-2)
+}
+
+// listTop is the first visible line, clamped to what there is to show. The
+// view reads it rather than storing its own, so a resize can't leave the
+// pane scrolled past its end.
+func (m *Model) listTop(total int) int {
+	return clamp(m.listScroll, 0, maxi(0, total-m.listRows()))
+}
+
+// scrollListPane moves the Resources pane by delta lines and nothing else.
+func (m *Model) scrollListPane(delta int) {
+	total := len(m.listEntries())
+	// From where the pane actually is, not from a stale offset a resize may
+	// have left behind.
+	m.listScroll = m.listTop(total) + delta
+	m.listScroll = m.listTop(total)
+}
+
+// syncListScroll nudges the pane just far enough to show the selected kind.
+// Selection moves the scroll; the scroll never moves the selection. A
+// selection folded out of sight moves nothing — its group header carries
+// the marker instead.
+func (m *Model) syncListScroll() {
+	entries := m.listEntries()
+	avail := m.listRows()
+
+	line := -1
+	for i, e := range entries {
+		if e.kind == m.resIdx {
+			line = i
+			break
+		}
+	}
+	if line < 0 {
+		m.listScroll = m.listTop(len(entries))
+		return
+	}
+	top := m.listTop(len(entries))
+	switch {
+	case line < top:
+		top = line
+		// Bring the group header along: a kind scrolled to the very top
+		// with no header over it reads as belonging to whichever group is
+		// above the window.
+		if line > 0 && entries[line-1].group != "" {
+			top = line - 1
+		}
+	case line >= top+avail:
+		top = line - avail + 1
+	}
+	m.listScroll = clamp(top, 0, maxi(0, len(entries)-avail))
+}
+
+// visible returns the kind indices the Resources pane is showing: the search
+// matches while a search is on (folding must never hide what you searched
+// for), otherwise everything in an unfolded group.
+func (m *Model) visible() []int {
+	f := m.filtered()
+	if m.search != "" {
+		return f
+	}
+	ks := m.kinds()
+	out := make([]int, 0, len(f))
+	for _, i := range f {
+		if !m.collapsed[ks[i].Group] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func (m *Model) filtered() []int {
 	q := strings.ToLower(m.search)
 	var out []int
@@ -389,7 +607,7 @@ func (m *Model) tableData() ([]string, [][]string) {
 
 // showNamespaceChooser opens the Namespaces table in the main panel — the
 // one route for changing namespace, whether you click the header button or
-// type /ns. Enter on a row switches to it (see openSelected).
+// type :ns. Enter on a row switches to it (see openSelected).
 func (m *Model) showNamespaceChooser() {
 	// Remember what the user was looking at: after picking a namespace they
 	// almost always want the same view, not pods.
@@ -469,7 +687,7 @@ func (m *Model) curRow() []string {
 }
 
 // curName reads the row's identity column: NAME for everything, OBJECT for
-// events. Looked up by header name (not a fixed index) since /ns all
+// events. Looked up by header name (not a fixed index) since :ns all
 // prepends a NAMESPACE column that shifts every other column right.
 func (m *Model) curName() string {
 	row := m.curRow()
@@ -490,7 +708,7 @@ func (m *Model) curName() string {
 }
 
 // curNamespace is the namespace of the currently selected row: the active
-// filter when it names one namespace, or — under /ns all — whatever that
+// filter when it names one namespace, or — under :ns all — whatever that
 // row's own NAMESPACE cell says, since rows there span many namespaces.
 func (m *Model) curNamespace() string {
 	if m.namespace != domain.AllNamespaces {
@@ -510,12 +728,10 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink, m.repaintTick()}
 	if m.connect != nil {
 		// The cluster is reached off the event loop, so the first frame —
-		// spinner and all — is on screen before anything can block.
+		// spinner and all — is on screen before anything can block. The
+		// empty name means kubeconfig's current-context, which is the only
+		// cluster k10s ever opens on.
 		cmds = append(cmds, m.connectCmd(""))
-	} else if m.initialCtx != "" {
-		ctx := m.initialCtx
-		m.initialCtx = ""
-		cmds = append(cmds, m.switchContextCmd(ctx))
 	}
 	// Nil unless the check is on and a day has passed, so most launches make
 	// no network call at all.
@@ -689,7 +905,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textLines = msg.lines
 		m.logKind, m.logNS, m.logName = msg.kind, msg.ns, msg.name
 		m.logMore = msg.more
-		m.logTail = logChunk
+		m.logTail = logInitial
 		m.logLoading = false
 		m.logScroll = 0
 		m.logFollow = true
@@ -758,9 +974,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.textLines = append(m.textLines, msg.line)
 		// While paused, a new line arriving at the bottom would shift the
-		// view; keep the same content in place by growing the offset.
+		// view; keep the same content in place by growing the offset. The
+		// offset counts display rows, so a line that wraps has to push by
+		// every row it takes — pushing by one per line was what made a
+		// paused view still creep upwards.
 		if !m.logFollow {
-			m.logScroll++
+			m.logScroll += m.logRows(msg.line)
 		}
 		return m, waitLogLine(m.logGen, m.logCh)
 
@@ -881,6 +1100,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// confirm modal captures everything
 	if m.confirm != nil {
+		notice := m.confirm.notice
 		switch key {
 		case "enter", "y", "Y":
 			cb := m.confirm.onOK
@@ -890,7 +1110,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case "esc", "n", "N", "q":
 			m.confirm = nil
-			m.toast = "cancelled"
+			if !notice {
+				m.toast = "cancelled"
+			}
 		}
 		return nil
 	}
@@ -899,8 +1121,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handlePaletteKey(msg)
 	}
 
-	// settings (also the first-run screen) takes priority over everything
-	// but quit
+	// the settings modal takes priority over everything but quit
 	if m.setOpen {
 		return m.handleSettingsKey(msg)
 	}
@@ -958,7 +1179,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			// in so the argument can be typed.
 			if len(sug) > 0 {
 				c := sug[clamp(m.sugIdx, 0, len(sug)-1)]
-				if c.Args != "" && !hasArgument(m.input.Value()) {
+				if c.Args != "" && !c.OptArgs && !hasArgument(m.input.Value()) {
 					m.acceptSuggestion(c)
 					return nil
 				}
@@ -1014,13 +1235,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case "right", "enter":
 			m.focus = focusMain
 			return nil
+		case " ", "space":
+			// Space folds the group you are standing in. While a search is
+			// running it stays a search character — "custom resources" has
+			// one in it — and folding is off anyway.
+			if m.search == "" {
+				m.toggleGroup(m.curKind().Group)
+				return nil
+			}
+		case "left":
+			// The tree-shaped half of the pairing with "right": fold this
+			// group away. Space is the toggle that also opens it again.
+			if m.search == "" && !m.collapsed[m.curKind().Group] {
+				m.toggleGroup(m.curKind().Group)
+			}
+			return nil
 		case ":", "/":
 			return m.openPrompt(key)
 		}
 		if cmd, handled := m.globalShortcut(msg); handled {
 			return cmd
 		}
-		if msg.Type == tea.KeyRunes && len(key) < 24 {
+		// Bubbletea reports a lone space as KeySpace, not KeyRunes, so it
+		// has to be admitted by hand — without it "custom resources" is
+		// unsearchable.
+		if isTypedText(msg) && len(key) < 24 {
 			m.search += string(msg.Runes)
 			m.applySearch()
 		}
@@ -1065,7 +1304,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if cmd, handled := m.globalShortcut(msg); handled {
 			return cmd
 		}
-		if msg.Type == tea.KeyRunes && len(key) < 24 {
+		if isTypedText(msg) && len(key) < 24 {
 			m.rowSearch += string(msg.Runes)
 			m.resetRowSelection()
 		}
@@ -1098,6 +1337,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+s":
 		return m.toggleMouse()
 	case "ctrl+a":
+		if aiDisabled {
+			m.noticeAI()
+			return nil
+		}
 		m.togglePromptMode()
 		m.focus = focusPrompt
 		return m.input.Focus()
@@ -1264,17 +1507,17 @@ func (m *Model) scrollPaneAt(x, y, delta int) {
 	}
 	m.focusPaneAt(x, y)
 
-	// Only the centre pane scrolls. The resource list changes the whole
-	// view as it moves, so scrolling it by accident while reaching for the
-	// table was more disruptive than useful; pick a kind by clicking it,
-	// ctrl+p or :search.
-	if pane == focusMain {
+	switch pane {
+	case focusMain:
 		m.scrollMain(delta)
+	case focusList:
+		// The Resources pane scrolls, but scrolling is only looking: the
+		// selected kind stays selected and the main panel stays put. It
+		// used to move the selection, which meant brushing the wheel on the
+		// way to the table swapped out the whole view.
+		m.scrollListPane(delta)
 	}
 }
-
-// scrollList moves the resource-list selection without stealing focus.
-func (m *Model) scrollList(delta int) { m.moveList(delta) }
 
 // scrollMain scrolls the centre pane, honouring whether it's showing a
 // table or a text view.
@@ -1411,7 +1654,7 @@ func (m *Model) toggleMouse() tea.Cmd {
 // user can type the argument straight away.
 func (m *Model) acceptSuggestion(c SlashCommand) {
 	v := c.Name
-	if c.Args != "" {
+	if c.Args != "" && !c.OptArgs {
 		v += " "
 	}
 	m.input.SetValue(v)
@@ -1420,6 +1663,10 @@ func (m *Model) acceptSuggestion(c SlashCommand) {
 }
 
 func (m *Model) togglePromptMode() {
+	if aiDisabled {
+		m.noticeAI()
+		return
+	}
 	if m.pmode == promptCmd {
 		m.pmode = promptAI
 		m.toast = "AI mode — plain text goes to " + m.cfg.model
@@ -1442,17 +1689,34 @@ func (m *Model) applySearch() {
 	m.selectResource(f[0])
 }
 
+// isTypedText reports whether a key press is plain text for a search box.
+// Space arrives as KeySpace rather than KeyRunes, and object names have
+// spaces in them, so both count.
+func isTypedText(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace
+}
+
 func (m *Model) moveList(delta int) {
-	f := m.filtered()
+	f := m.visible()
 	if len(f) == 0 {
 		return
 	}
-	pos := 0
+	// The selection can sit in a group that was folded after it was made.
+	// Stepping from there means stepping from where it *would* be, so ↓
+	// lands on the next visible kind rather than jumping to the top.
+	pos, found := 0, false
 	for k, i := range f {
 		if i == m.resIdx {
-			pos = k
+			pos, found = k, true
 			break
 		}
+		if i < m.resIdx {
+			pos = k
+		}
+	}
+	if !found && delta > 0 {
+		pos++
+		delta--
 	}
 	m.selectResource(f[clamp(pos+delta, 0, len(f)-1)])
 }
@@ -1515,6 +1779,7 @@ func (m *Model) selectResource(i int) {
 	m.rowIdx = clamp(m.rowIdx, 0, maxi(0, len(rows)-1))
 	m.rowScroll = 0
 	m.syncScroll()
+	m.syncListScroll()
 	m.toast = "→ " + m.curKind().Name
 }
 
@@ -1643,7 +1908,7 @@ func (m *Model) startLogs(kind, ns, name string) tea.Cmd {
 	return func() tea.Msg {
 		// Load a page of history first so the view opens with content, then
 		// attach the follow stream on top of it.
-		lines, more, err := src.LogsTail(kind, ns, name, logChunk)
+		lines, more, err := src.LogsTail(kind, ns, name, logInitial)
 		if err != nil {
 			return logStartMsg{kind: kind, ns: ns, name: name, err: err}
 		}
@@ -1778,29 +2043,18 @@ func (m *Model) runCommand(cmd string) tea.Cmd {
 
 	if m.pmode == promptAI {
 		m.closePrompt()
+		if aiDisabled {
+			m.noticeAI()
+			return nil
+		}
 		return m.askAI(cmd)
 	}
 
-	// Typing any enabled CLI name is fine — "kubectl get pods", "k get pods"
-	// and "k8s get pods" all mean the same thing.
-	cmd = strings.TrimSpace(stripCLIPrefix(cmd, m.clis))
-
-	for _, r := range m.kinds() {
-		if strings.Contains(cmd, r.Key) || strings.Contains(cmd, " "+r.Short) {
-			for i, k := range m.kinds() {
-				if k.Key == r.Key {
-					m.selectResource(i)
-					break
-				}
-			}
-			m.toast = "$ " + m.cli + " " + cmd
-			m.closePrompt()
-			return nil
-		}
-	}
-	m.toast = "$ " + m.cli + " " + cmd + "  (not executed — read-only passthrough)"
+	// Anything else is a shell command: it runs, and its output opens in the
+	// main panel (see shellcmd.go). Resource navigation is ":po", ":svc" …,
+	// so nothing here has to guess what a line of text meant.
 	m.closePrompt()
-	return nil
+	return m.runShellCmd(cmd)
 }
 
 func (m *Model) askAI(prompt string) tea.Cmd {
@@ -1830,16 +2084,9 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 	arg = strings.TrimSpace(arg)
 
 	switch name {
-	// The three "which one?" commands never ask you to type a name — they
-	// open a picker showing what is actually available.
-	case "/context", "/ctx":
-		m.closePrompt()
-		m.showContextChooser()
-		return nil
-	case "/ns", "/namespace":
-		m.closePrompt()
-		m.showNamespaceChooser()
-		return nil
+	// Namespace and context moved to ":" — they name things the cluster
+	// has, like every other ":" command, and that is where a k9s user
+	// reaches for them. What is left under "/" is k10s's own settings.
 	case "/theme":
 		m.openThemePicker()
 		m.closePrompt()
@@ -1858,6 +2105,23 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 	case ":mouse":
 		m.closePrompt()
 		return m.toggleMouse()
+	case ":ctx", ":context", ":contexts":
+		m.closePrompt()
+		if arg == "" {
+			m.showContextChooser()
+			return nil
+		}
+		if !slices.Contains(m.src.Contexts(), arg) {
+			m.toast = "✗ no context named " + arg
+			return nil
+		}
+		return m.switchContextCmd(arg)
+	case ":aliases", ":alias":
+		m.showText("aliases", aliasReport(m.kinds()))
+		m.closePrompt()
+		return nil
+	case ":q", ":quit", ":qa", ":q!":
+		return tea.Quit
 
 	case ":scale":
 		n, err := strconv.Atoi(arg)
@@ -1893,21 +2157,96 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 	case "/help":
 		m.showText("help", Help())
 	default:
+		// Anything else under ":" is a resource name, k9s-style — ":po",
+		// ":deploy", ":ns" — optionally followed by a namespace or a filter.
+		if name != "" && name[0] == ':' {
+			if key, ok := kindForAlias(name, m.kinds()); ok {
+				m.closePrompt()
+				m.gotoKind(key, arg)
+				return nil
+			}
+		}
 		m.toast = "unknown command " + name + " — /help lists everything"
 	}
 	m.closePrompt()
 	return nil
 }
 
+// gotoKind is what ":po", ":deploy kube-system" and ":svc api" do: open that
+// kind's table, and read the optional argument as a namespace when it names
+// one, otherwise as a row filter — the two things you'd want to narrow by.
+func (m *Model) gotoKind(key, arg string) {
+	// ":ns" alone is the namespace switcher, the same one the header button
+	// opens; ":ns <name>" skips the picking and switches outright,
+	// leaving you on whatever view you were already reading.
+	if key == "namespaces" {
+		if arg == "" {
+			m.showNamespaceChooser()
+			return
+		}
+		if m.isNamespace(arg) {
+			m.applyNamespace(arg)
+			return
+		}
+	}
+
+	m.jumpToResource(key)
+	m.mode = modeTable
+	m.rowSearch = ""
+	label := "→ " + m.curKind().Name
+
+	switch {
+	case arg == "":
+	case m.curKind().Namespaced && m.isNamespace(arg):
+		m.applyNamespace(arg)
+		label += " · " + arg
+	default:
+		m.rowSearch = arg
+		label += " · filter: " + arg
+	}
+	m.resetRowSelection()
+	m.toast = label
+}
+
+// isNamespace reports whether a word names a namespace of this cluster, or
+// the "all" sentinel — what tells ":po kube-system" from ":po nginx".
+func (m *Model) isNamespace(name string) bool {
+	return name == domain.AllNamespaces || slices.Contains(m.src.Namespaces(), name)
+}
+
 // jumpToResource selects a resource kind by its Key, used by /crd and /dr.
 func (m *Model) jumpToResource(key string) {
 	for i, r := range m.kinds() {
 		if r.Key == key {
+			m.revealGroup(i)
 			m.selectResource(i)
 			m.focus = focusMain
 			return
 		}
 	}
+}
+
+// revealGroup unfolds the group a kind lives in. Arriving somewhere by
+// command or palette should not leave you on a table whose sidebar row is
+// folded out of sight — but only arriving does this: walking the list with
+// the arrow keys never opens a group you folded, because folded kinds are
+// not in the walk to begin with.
+func (m *Model) revealGroup(kindIdx int) {
+	ks := m.kinds()
+	if kindIdx < 0 || kindIdx >= len(ks) || !m.collapsed[ks[kindIdx].Group] {
+		return
+	}
+	m.collapsed[ks[kindIdx].Group] = false
+	m.saveConfig()
+}
+
+// commandSet is what a prefix offers. The ":" set is built per call because
+// its resource half comes from the kinds the connected backend serves.
+func (m *Model) commandSet(prefix byte) []SlashCommand {
+	if prefix != ':' {
+		return clusterCommands
+	}
+	return append(append([]SlashCommand{}, appCommands...), resourceCommands(m.kinds())...)
 }
 
 // suggestions returns slash commands matching the current input.
@@ -1917,16 +2256,45 @@ func (m *Model) suggestions() []SlashCommand {
 		return nil
 	}
 	head, _, _ := strings.Cut(v, " ")
-	var out []SlashCommand
-	for _, c := range commandsFor(v[0]) {
-		if strings.HasPrefix(c.Name, head) {
-			out = append(out, c)
+	head = strings.ToLower(head)
+	// A fully typed name leads, even when it is also the prefix of a longer
+	// one: ":pv" is PersistentVolumes, not the first of ":pvs"/":pvcs" in
+	// kind order, and enter runs whatever is highlighted.
+	var exact, rest []SlashCommand
+	for _, c := range m.commandSet(v[0]) {
+		switch {
+		case c.matches(head):
+			exact = append(exact, c)
+		case c.prefixed(head):
+			rest = append(rest, c)
 		}
 	}
-	if len(out) == 1 && out[0].Name == head {
-		return nil
+	// A fully typed command keeps its row. Hiding the popup the moment the
+	// last letter lands — which is what ":job" and ":nodes" used to do —
+	// reads as "that command does not exist", exactly when you most want
+	// confirmation that it does.
+	return append(exact, rest...)
+}
+
+// sugRows is how many suggestions the popup can draw at once. It floats
+// above the prompt, so a bare ":" — every command plus one per kind — must
+// not be taller than the screen it sits in. The rest are not dropped: the
+// popup scrolls (see sugTop), because a command you cannot reach might as
+// well not exist.
+func (m *Model) sugRows() int {
+	return clamp(m.h-8, 3, 16)
+}
+
+// sugTop is the first suggestion drawn, chosen so the highlighted one is
+// always among them.
+func (m *Model) sugTop(n int) int {
+	rows := m.sugRows()
+	if n <= rows {
+		return 0
 	}
-	return out
+	cur := clamp(m.sugIdx, 0, n-1)
+	top := clamp(cur-rows/2, 0, n-rows)
+	return top
 }
 
 // ---- mouse ----------------------------------------------------------------
@@ -1961,6 +2329,16 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
+	// The command popup owns it too, for the same reason: it holds more
+	// entries than it can draw, so the wheel is how you get to the rest —
+	// not a way to quietly scroll the table behind it.
+	if wheel != 0 {
+		if sug := m.suggestions(); len(sug) > 0 {
+			m.sugIdx = clamp(m.sugIdx+wheel, 0, len(sug)-1)
+			return nil
+		}
+	}
+
 	// Otherwise the wheel scrolls whatever the pointer is over, not whatever
 	// has keyboard focus — hovering a pane to scroll it shouldn't first
 	// require clicking into it.
@@ -1973,13 +2351,14 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	if m.confirm != nil {
+		notice := m.confirm.notice
 		if zone.Get("cf:ok").InBounds(msg) {
 			cb := m.confirm.onOK
 			m.confirm = nil
 			if cb != nil {
 				return cb(m)
 			}
-		} else if zone.Get("cf:no").InBounds(msg) {
+		} else if !notice && zone.Get("cf:no").InBounds(msg) {
 			m.confirm = nil
 			m.toast = "cancelled"
 		}
@@ -2001,12 +2380,6 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		switch {
 		case zone.Get("set:save").InBounds(msg):
 			return m.closeSettings()
-		case zone.Get("set:openai").InBounds(msg):
-			m.setProvider(0)
-			return nil
-		case zone.Get("set:anthropic").InBounds(msg):
-			m.setProvider(1)
-			return nil
 		case zone.Get("set:updon").InBounds(msg):
 			m.setUpdateChecks(true)
 			return nil
@@ -2073,7 +2446,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	if zone.Get("aimode").InBounds(msg) {
-		m.togglePromptMode()
+		m.togglePromptMode() // says why, when AI is disabled
 		return nil
 	}
 	if zone.Get("prompt").InBounds(msg) {
@@ -2087,6 +2460,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
+	for gi, g := range m.groupOrder() {
+		if zone.Get(fmt.Sprintf("grp:%d", gi)).InBounds(msg) {
+			m.toggleGroup(g)
+			return nil
+		}
+	}
 	for i := range m.kinds() {
 		if zone.Get(fmt.Sprintf("res:%d", i)).InBounds(msg) {
 			// Selecting a kind, not the pane: focus stays where it was.

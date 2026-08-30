@@ -97,15 +97,57 @@ func TestRowCountStartsNoInformers(t *testing.T) {
 	s := newTestStore(t, pod("default", "web-1", "node-a", true))
 
 	for _, k := range s.Kinds() {
+		// Custom Resources are the one kind whose number can arrive without
+		// an informer: drawing their badge starts the background CRD sweep,
+		// and it may have answered by the time the loop comes back round.
+		if k.Key == "customresources" {
+			continue
+		}
 		if got := s.RowCount(k.Key, domain.AllNamespaces); got != domain.CountUnknown {
 			t.Errorf("RowCount(%q) = %d before the kind was opened, want CountUnknown", k.Key, got)
 		}
 	}
 
 	for _, k := range s.Kinds() {
+		// Same exception, from the other side: the CRD informer belongs to
+		// that background sweep, not to the render path. Everything else
+		// must still be untouched — drawing the sidebar must not open
+		// cluster-wide watches.
+		if k.Key == "crds" {
+			continue
+		}
 		if s.isStarted(k.Key) {
 			t.Errorf("RowCount started an informer for %q — drawing the sidebar must not open watches", k.Key)
 		}
+	}
+}
+
+// Drawing a sidebar badge for a kind must not set the *custom resource*
+// sweep going either: that one costs a LIST per CRD, which on a cluster with
+// cert-manager, Argo and prometheus-operator is dozens of requests nobody
+// asked for. It starts when Custom Resources is on screen, and not before.
+func TestCustomResourceSweepWaitsUntilItIsShown(t *testing.T) {
+	s := newTestStore(t, pod("default", "web-1", "node-a", true))
+
+	for _, k := range s.Kinds() {
+		if k.Key == "customresources" {
+			continue
+		}
+		s.RowCount(k.Key, domain.AllNamespaces)
+	}
+	s.crMu.Lock()
+	running := s.crRunning
+	s.crMu.Unlock()
+	if running {
+		t.Error("the custom-resource sweep started without that kind being drawn")
+	}
+
+	s.RowCount("customresources", domain.AllNamespaces)
+	s.crMu.Lock()
+	running = s.crRunning
+	s.crMu.Unlock()
+	if !running {
+		t.Error("drawing the Custom Resources badge did not start its sweep")
 	}
 }
 

@@ -7,13 +7,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/p10node/k10s/internal/ai"
 	"github.com/p10node/k10s/internal/config"
 	"github.com/p10node/k10s/internal/version"
 )
 
-// The single settings modal: CLI name and AI provider in one place, doubling
-// as the first-run screen.
+// The single settings modal: CLI name and the update check in one place.
+// Opened by /settings, and only by /settings.
 func (m *Model) overlaySettings(root Block) Block {
 	th := m.th()
 	s := func(c lipgloss.Color) lipgloss.Style {
@@ -65,65 +64,16 @@ func (m *Model) overlaySettings(root Block) Block {
 		body = append(body, zone.Mark(fmt.Sprintf("set:%d", ci), padBG(row, inner, bg)))
 	}
 
+	// The AI PROMPT block (provider radios, base url, model, api key) used
+	// to sit here. It is gone while the feature is off — see aidisabled.go.
 	body = append(body,
 		s(th.Subtle).Render("  shown in hints  ")+s(th.Ok).Render("$ "+m.selectedCLI()+" get pods"),
-		"",
-		s(th.Subtle).Render("  AI PROMPT")+s(th.Border).Render("  — used by AI mode (ctrl+a)"),
-	)
-
-	// Provider radios.
-	pi := rowProvider()
-	{
-		bg := rowBG(pi)
-		st := func(c lipgloss.Color) lipgloss.Style {
-			return lipgloss.NewStyle().Background(bg).Foreground(c)
-		}
-		radio := func(on bool, txt, id string) string {
-			mark, col := "○ ", th.Subtle
-			if on {
-				mark, col = "● ", th.Accent2
-			}
-			return zone.Mark(id, st(col).Render(mark+txt))
-		}
-		row := st(th.Accent).Render(lead(pi)) +
-			radio(m.cfg.provider == 0, ai.Providers[0].Label, "set:openai") +
-			st(bg).Render("   ") +
-			radio(m.cfg.provider == 1, ai.Providers[1].Label, "set:anthropic")
-		body = append(body, zone.Mark(fmt.Sprintf("set:%d", pi), padBG(row, inner, bg)))
-	}
-
-	// Text fields.
-	field := func(i int, name, val string, secret bool) string {
-		bg := rowBG(i)
-		st := func(c lipgloss.Color) lipgloss.Style {
-			return lipgloss.NewStyle().Background(bg).Foreground(c)
-		}
-		row := st(th.Accent).Render(lead(i)) + st(th.Subtle).Render(fmt.Sprintf("%-9s", name))
-		if m.setEditing && m.setRow == i {
-			m.input.Width = inner - 16
-			row += m.input.View()
-		} else {
-			shown := val
-			if secret {
-				shown = maskKey(val)
-			}
-			if shown == "" {
-				shown = "—"
-			}
-			row += st(th.Fg).Render(trunc(shown, inner-16))
-		}
-		return zone.Mark(fmt.Sprintf("set:%d", i), padBG(row, inner, bg))
-	}
-	body = append(body,
-		field(rowURL(), "base url", m.cfg.url, false),
-		field(rowModel(), "model", m.cfg.model, false),
-		field(rowKey(), "api key", m.cfg.key, true),
 		"",
 		s(th.Subtle).Render("  UPDATES")+s(th.Border).Render("  — /update installs on demand"),
 	)
 
-	// Update check toggle. Same shape as the provider radios, because it is
-	// the same kind of choice: two states, no typing.
+	// Update check toggle: two states, no typing, so it is a pair of radios
+	// rather than a field.
 	ui := rowUpdate()
 	{
 		bg := rowBG(ui)
@@ -162,22 +112,8 @@ func (m *Model) overlaySettings(root Block) Block {
 	body = append(body, s(th.Subtle).Render(hint)+s(th.Bg).Render(spaces(gap))+btn+s(th.Bg).Render(" "))
 
 	title := "Settings"
-	if !m.onboarded {
-		title = "Welcome to k10s"
-	}
 
 	h := len(body) + 2
 	box := Panel(th, PanelOpts{Title: title, Focused: true, W: w, H: h}, body)
 	return root.Overlay(box, (m.w-w)/2, maxi(0, (m.h-h)/2))
-}
-
-// maskKey shows enough of an API key to recognise it without exposing it.
-func maskKey(k string) string {
-	if k == "" {
-		return ""
-	}
-	if len(k) > 18 {
-		return k[:10] + "••••" + k[len(k)-4:]
-	}
-	return strings.Repeat("•", len(k))
 }

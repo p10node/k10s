@@ -38,6 +38,7 @@ var podActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.A
 var wlActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AScale, domain.AEdit, domain.ADelete}
 var basicActions = []string{domain.ADescribe, domain.AYAML, domain.AEdit, domain.ADelete}
 var nodeActions = []string{domain.ADescribe, domain.AYAML, domain.ATop, domain.ACordon, domain.ADrain, domain.AEdit}
+var rsActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AScale, domain.AEdit, domain.ADelete}
 
 // clusterNodes are the fake cluster's nodes (header gauges + "nodes" kind).
 var clusterNodes = []node{
@@ -48,7 +49,7 @@ var clusterNodes = []node{
 
 const clusterVersion = "v1.31.4"
 
-// contexts available for /context switching.
+// contexts available for :ctx switching.
 var contexts = []string{
 	"prod-eu-west-1",
 	"eks-staging-apse1",
@@ -104,6 +105,22 @@ var resources = []resourceDef{
 		},
 	},
 	{
+		Kind: domain.Kind{Key: "replicasets", Name: "ReplicaSets", Short: "rs", Group: "Workloads", Namespaced: true,
+			Cols: []string{"NAME", "DESIRED", "CURRENT", "READY", "AGE"}, Allowed: rsActions},
+		Rows: [][]string{
+			{"api-gateway-7d9f4c8b6d", "2", "2", "2", "6d"},
+			{"auth-service-5c7b9d4f8", "1", "1", "1", "14d"},
+			{"billing-worker-6f8d9c5b7", "1", "1", "0", "12d"},
+			{"payment-api-9d7c8f6b5", "2", "2", "1", "2d"},
+			{"web-frontend-6b8c7d9f5", "3", "3", "3", "1d"},
+			{"web-frontend-5f7a9c2e1", "0", "0", "0", "9d"},
+		},
+		Extra: []nsRow{
+			{"kube-system", []string{"coredns-6d4b75cb6d", "2", "2", "2", "128d"}},
+			{"staging", []string{"checkout-api-77b9d5c4f", "2", "2", "1", "5d"}},
+		},
+	},
+	{
 		Kind: domain.Kind{Key: "statefulsets", Name: "StatefulSets", Short: "sts", Group: "Workloads", Namespaced: true,
 			Cols: []string{"NAME", "READY", "IMAGE", "AGE"}, Allowed: wlActions},
 		Rows: [][]string{
@@ -137,6 +154,18 @@ var resources = []resourceDef{
 		},
 	},
 	{
+		Kind: domain.Kind{Key: "hpas", Name: "HPAs", Short: "hpa", Group: "Workloads", Namespaced: true,
+			Cols: []string{"NAME", "REFERENCE", "TARGETS", "MIN", "MAX", "REPLICAS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"api-gateway", "Deployment/api-gateway", "cpu: 41%/70%", "2", "10", "2", "48d"},
+			{"web-frontend", "Deployment/web-frontend", "cpu: 88%/70%", "3", "12", "5", "9d"},
+			{"payment-api", "Deployment/payment-api", "cpu: <unknown>/60%", "1", "6", "2", "77d"},
+		},
+		Extra: []nsRow{
+			{"staging", []string{"checkout-api", "Deployment/checkout-api", "cpu: 12%/70%", "1", "4", "1", "5d"}},
+		},
+	},
+	{
 		Kind: domain.Kind{Key: "services", Name: "Services", Short: "svc", Group: "Network", Namespaced: true,
 			Cols: []string{"NAME", "TYPE", "CLUSTER-IP", "PORTS", "AGE"}, Allowed: []string{domain.ADescribe, domain.AYAML, domain.APortFwd, domain.AEdit, domain.ADelete}},
 		Rows: [][]string{
@@ -151,11 +180,36 @@ var resources = []resourceDef{
 		},
 	},
 	{
+		Kind: domain.Kind{Key: "endpoints", Name: "Endpoints", Short: "ep", Group: "Network", Namespaced: true,
+			Cols: []string{"NAME", "ENDPOINTS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"api-gateway", "10.244.2.117:8080,10.244.1.64:8080", "48d"},
+			{"cache-redis", "10.244.1.31:6379,10.244.2.88:6379", "62d"},
+			{"payment-api", "10.244.2.19:8080", "77d"},
+			{"web-frontend", "10.244.1.12:80,10.244.3.7:80,10.244.2.55:80", "9d"},
+		},
+		Extra: []nsRow{
+			{"kube-system", []string{"kube-dns", "10.244.0.2:53,10.244.0.3:53", "128d"}},
+		},
+	},
+	{
 		Kind: domain.Kind{Key: "ingresses", Name: "Ingresses", Short: "ing", Group: "Network", Namespaced: true,
 			Cols: []string{"NAME", "CLASS", "HOSTS", "ADDRESS", "AGE"}, Allowed: basicActions},
 		Rows: [][]string{
 			{"web", "nginx", "app.example.com", "10.0.9.4", "9d"},
 			{"api", "nginx", "api.example.com", "10.0.9.4", "48d"},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "networkpolicies", Name: "NetworkPolicies", Short: "netpol", Group: "Network", Namespaced: true,
+			Cols: []string{"NAME", "POD-SELECTOR", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"default-deny-ingress", "<none>", "180d"},
+			{"allow-web-to-api", "app=api-gateway", "48d"},
+			{"allow-metrics-scrape", "app=web-frontend", "62d"},
+		},
+		Extra: []nsRow{
+			{"monitoring", []string{"allow-prometheus", "app=grafana", "62d"}},
 		},
 	},
 	{
@@ -184,12 +238,123 @@ var resources = []resourceDef{
 		},
 	},
 	{
+		Kind: domain.Kind{Key: "resourcequotas", Name: "ResourceQuotas", Short: "quota", Group: "Config", Namespaced: true,
+			Cols: []string{"NAME", "REQUEST", "LIMIT", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"compute-quota", "cpu: 4200m/16, memory: 12Gi/32Gi", "cpu: 8/32, memory: 24Gi/64Gi", "180d"},
+			{"object-quota", "-", "-", "180d"},
+		},
+		Extra: []nsRow{
+			{"staging", []string{"compute-quota", "cpu: 900m/8, memory: 3Gi/16Gi", "cpu: 2/16, memory: 6Gi/32Gi", "77d"}},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "limitranges", Name: "LimitRanges", Short: "limits", Group: "Config", Namespaced: true,
+			Cols: []string{"NAME", "LIMITS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"default-limits", "Container", "180d"},
+			{"pvc-limits", "PersistentVolumeClaim", "128d"},
+		},
+		Extra: []nsRow{
+			{"staging", []string{"default-limits", "Container,Pod", "77d"}},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "pdbs", Name: "PDBs", Short: "pdb", Group: "Config", Namespaced: true,
+			Cols: []string{"NAME", "MIN AVAILABLE", "MAX UNAVAILABLE", "ALLOWED", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"api-gateway", "1", "N/A", "1", "48d"},
+			{"cache-redis", "2", "N/A", "0", "62d"},
+			{"web-frontend", "N/A", "25%", "1", "9d"},
+		},
+		Extra: []nsRow{
+			{"kube-system", []string{"coredns", "1", "N/A", "1", "128d"}},
+		},
+	},
+	{
 		Kind: domain.Kind{Key: "pvcs", Name: "PVCs", Short: "pvc", Group: "Storage", Namespaced: true,
 			Cols: []string{"NAME", "STATUS", "CAPACITY", "STORAGECLASS", "AGE"}, Allowed: basicActions},
 		Rows: [][]string{
 			{"data-cache-redis-0", "Bound", "10Gi", "gp3", "62d"},
 			{"data-cache-redis-1", "Bound", "10Gi", "gp3", "62d"},
 			{"data-postgres-0", "Bound", "100Gi", "gp3", "180d"},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "pvs", Name: "PVs", Short: "pv", Group: "Storage", Namespaced: false,
+			Cols: []string{"NAME", "CAPACITY", "ACCESS", "RECLAIM", "STATUS", "CLAIM", "STORAGECLASS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"pvc-0f1a2b3c", "10Gi", "RWO", "Delete", "Bound", "default/data-cache-redis-0", "gp3", "62d"},
+			{"pvc-4d5e6f70", "10Gi", "RWO", "Delete", "Bound", "default/data-cache-redis-1", "gp3", "62d"},
+			{"pvc-89ab0cde", "100Gi", "RWO", "Retain", "Bound", "default/data-postgres-0", "gp3", "180d"},
+			{"pv-archive-cold", "500Gi", "RWX", "Retain", "Available", "<none>", "efs-sc", "128d"},
+			{"pv-orphaned-logs", "20Gi", "RWO", "Retain", "Released", "staging/logs-old", "gp2", "94d"},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "storageclasses", Name: "StorageClasses", Short: "sc", Group: "Storage", Namespaced: false,
+			Cols: []string{"NAME", "PROVISIONER", "RECLAIM", "BINDING", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"gp3 (default)", "ebs.csi.aws.com", "Delete", "WaitForFirstConsumer", "180d"},
+			{"gp2", "kubernetes.io/aws-ebs", "Delete", "Immediate", "180d"},
+			{"efs-sc", "efs.csi.aws.com", "Retain", "Immediate", "128d"},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "serviceaccounts", Name: "ServiceAccounts", Short: "sa", Group: "RBAC", Namespaced: true,
+			Cols: []string{"NAME", "SECRETS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"default", "0", "180d"},
+			{"api-gateway", "1", "48d"},
+			{"payment-api", "1", "77d"},
+		},
+		Extra: []nsRow{
+			{"kube-system", []string{"coredns", "0", "128d"}},
+			{"argocd", []string{"argocd-application-controller", "1", "90d"}},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "roles", Name: "Roles", Short: "role", Group: "RBAC", Namespaced: true,
+			Cols: []string{"NAME", "RULES", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"config-reader", "2", "48d"},
+			{"secret-reader", "1", "77d"},
+		},
+		Extra: []nsRow{
+			{"kube-system", []string{"extension-apiserver-authentication-reader", "1", "180d"}},
+			{"argocd", []string{"argocd-application-controller", "6", "90d"}},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "rolebindings", Name: "RoleBindings", Short: "rb", Group: "RBAC", Namespaced: true,
+			Cols: []string{"NAME", "ROLE", "SUBJECTS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"config-reader", "Role/config-reader", "api-gateway", "48d"},
+			{"secret-reader", "Role/secret-reader", "payment-api", "77d"},
+		},
+		Extra: []nsRow{
+			{"argocd", []string{"argocd-application-controller", "Role/argocd-application-controller", "argocd-application-controller", "90d"}},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "clusterroles", Name: "ClusterRoles", Short: "crole", Group: "RBAC", Namespaced: false,
+			Cols: []string{"NAME", "RULES", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"cluster-admin", "2", "180d"},
+			{"edit", "34", "180d"},
+			{"view", "27", "180d"},
+			{"system:node", "12", "180d"},
+			{"prometheus", "5", "128d"},
+		},
+	},
+	{
+		Kind: domain.Kind{Key: "clusterrolebindings", Name: "ClusterRoleBindings", Short: "crb", Group: "RBAC", Namespaced: false,
+			Cols: []string{"NAME", "ROLE", "SUBJECTS", "AGE"}, Allowed: basicActions},
+		Rows: [][]string{
+			{"cluster-admin", "ClusterRole/cluster-admin", "system:masters", "180d"},
+			{"platform-oncall", "ClusterRole/edit", "sre,platform +2 more", "94d"},
+			{"prometheus", "ClusterRole/prometheus", "prometheus", "128d"},
+			{"system:node", "ClusterRole/system:node", "<none>", "180d"},
 		},
 	},
 	{
@@ -234,8 +399,8 @@ var resources = []resourceDef{
 	},
 	{
 		// Instances of the CRDs above. Nothing lives in "default" here (real
-		// clusters rarely put operator-managed CRs there), so /ns default
-		// shows zero rows — switch to /ns all or a specific namespace
+		// clusters rarely put operator-managed CRs there), so :ns default
+		// shows zero rows — switch to :ns all or a specific namespace
 		// (argocd, cert-manager, monitoring) to see them via Extra.
 		Kind: domain.Kind{Key: "customresources", Name: "Custom Resources", Short: "cr", Group: "Custom Resources", Namespaced: true,
 			Cols: []string{"NAME", "KIND", "AGE"}, Allowed: []string{domain.ADescribe, domain.AYAML, domain.AEdit, domain.ADelete}},

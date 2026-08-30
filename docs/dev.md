@@ -85,8 +85,9 @@ and feeds the result back (`drain`), following the chain only while the
 message is one of the UI's own async messages (`ui.IsAsyncMsg`) — otherwise a
 self-perpetuating command like the cursor blink would loop forever.
 
-**Note:** the first run shows the onboarding overlay. Prefix key sequences
-with `esc` to dismiss it, as the examples above do.
+**Note:** `shot` gets a throwaway `K10S_CONFIG` per run, so it always starts
+as a first run — which now opens straight into the cluster, no overlay to
+dismiss first.
 
 ## Width invariant
 

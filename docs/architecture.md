@@ -18,13 +18,17 @@ internal/ui/
   model.go              Model state, Update: key/mouse dispatch, async commands
   view.go               View: header, list, table/text, actions, prompt
   actions.go            the action table (id, hotkey, label, risky)
-  commands.go           slash commands + /help text
+  commands.go           "/" and ":" commands, kind aliases, /help text
+  shellcmd.go           plain text at the prompt → a shell command
   msgs.go               async result messages
   connect.go            startup: pendingSource + the background connect
   update.go             /update + /version: the check, the confirm, the install
-  pickers.go/_view.go   onboarding + theme picker
+  pickers.go/_view.go   theme picker
   palette.go/_view.go   global search palette, namespace picker
-  nspicker.go           namespace picker logic
+  ctxpicker.go          context chooser, in the main panel
+  settings.go/_view.go  the settings dialog (CLI name, AI, update check)
+  logview.go            the log viewer
+  shell.go              the in-panel interactive shell (exec)
   loading.go            spinner / indeterminate progress
 ```
 
@@ -112,9 +116,9 @@ does the work off-thread and posts a message back (`internal/ui/msgs.go`):
 
 | Message                          | Produced by                                  |
 |----------------------------------|----------------------------------------------|
-| `textResultMsg`                  | describe / YAML / logs snapshot / top / AI   |
+| `textResultMsg`                  | describe / YAML / logs snapshot / top / AI / a shell command |
 | `actionResultMsg`                | delete, restart, scale, cordon, drain, apply |
-| `ctxSwitchMsg`                   | `/context` — rebuilds the whole client       |
+| `ctxSwitchMsg`                   | `:ctx` — rebuilds the whole client           |
 | `logStartMsg` / `logLineMsg`     | `LogsFollow` streaming                       |
 | `editFetchedMsg` / `editExitMsg` | the `$EDITOR` round trip                     |
 | `portForwardMsg`                 | port-forward start                           |
@@ -127,9 +131,9 @@ chain synchronously without a real event loop.
 
 Every clickable element is a named zone: `res:<i>`, `row:<i>`, `act:<id>`,
 `zoom`, `close`, `theme`, `nsfield`, `prompt`, `aimode`, `tablesearch`,
-`sug:<i>`, `pal:<i>`, `nsp:<i>`, `thm:<i>`, `ob:<i>`, `cf:ok`/`cf:no`,
-`cfg:*`. `handleMouse` checks overlay zones first (confirm → config → theme →
-onboarding → palette → namespace → suggestions), then chrome, then lists.
+`sug:<i>`, `pal:<i>`, `grp:<i>`, `thm:<i>`, `cf:ok`/`cf:no`,
+`set:<i>`. `handleMouse` checks overlay zones first (confirm → settings →
+theme → palette → suggestions), then chrome, then lists.
 
 Two fallbacks make panes feel solid rather than only their contents:
 - the wheel scrolls **and focuses** whichever pane the pointer is over
@@ -145,7 +149,7 @@ selection — the only way to copy text out of a mouse-capturing TUI.
 1. `ctrl+c` always quits
 2. confirm modal (enter/y confirm, esc/n cancel)
 3. search palette / namespace picker
-4. first-run onboarding, theme picker
+4. theme picker
 5. AI settings modal (incl. inline edit sub-state)
 6. prompt focused → suggestions navigation, then textinput
 7. resource list focused → type-to-filter

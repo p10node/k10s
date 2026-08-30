@@ -24,6 +24,21 @@ var kindToGK = map[string]schema.GroupKind{
 	"nodes":        {Kind: "Node"},
 	"namespaces":   {Kind: "Namespace"},
 	"events":       {Kind: "Event"},
+
+	"replicasets":         {Group: "apps", Kind: "ReplicaSet"},
+	"hpas":                {Group: "autoscaling", Kind: "HorizontalPodAutoscaler"},
+	"endpoints":           {Kind: "Endpoints"},
+	"networkpolicies":     {Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	"resourcequotas":      {Kind: "ResourceQuota"},
+	"limitranges":         {Kind: "LimitRange"},
+	"pdbs":                {Group: "policy", Kind: "PodDisruptionBudget"},
+	"pvs":                 {Kind: "PersistentVolume"},
+	"storageclasses":      {Group: "storage.k8s.io", Kind: "StorageClass"},
+	"serviceaccounts":     {Kind: "ServiceAccount"},
+	"roles":               {Group: "rbac.authorization.k8s.io", Kind: "Role"},
+	"rolebindings":        {Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"},
+	"clusterroles":        {Group: "rbac.authorization.k8s.io", Kind: "ClusterRole"},
+	"clusterrolebindings": {Group: "rbac.authorization.k8s.io", Kind: "ClusterRoleBinding"},
 }
 
 func effectiveNS(ns string) string {

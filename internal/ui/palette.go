@@ -112,7 +112,7 @@ func identityColumn(cols []string, kindKey string) int {
 }
 
 // rowNamespace reports which namespace a row belongs to, reading the
-// NAMESPACE column when /ns all put one there.
+// NAMESPACE column when :ns all put one there.
 func rowNamespace(cols []string, row []string, fallback string) string {
 	for i, c := range cols {
 		if c == "NAMESPACE" && i < len(row) {
@@ -161,6 +161,7 @@ func (m *Model) handlePaletteKey(msg tea.KeyMsg) tea.Cmd {
 
 // gotoHit jumps to whatever was picked and closes the palette.
 func (m *Model) gotoHit(h paletteHit) {
+	m.revealGroup(h.kindIdx)
 	m.selectResource(h.kindIdx)
 	if h.row >= 0 {
 		m.rowIdx = h.row

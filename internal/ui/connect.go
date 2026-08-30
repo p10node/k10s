@@ -83,26 +83,25 @@ func (m *Model) handleConnected(msg srcConnectedMsg) tea.Cmd {
 	if old != nil {
 		old.Close()
 	}
-	// A namespace pinned in config wins; otherwise take the context's own.
-	if !m.nsPinned {
+	// A namespace restored from config for *this* context wins; otherwise
+	// take the context's own.
+	if !m.nsPinned || m.namespace == "" {
 		m.namespace = m.src.DefaultNamespace()
 	}
 	m.resIdx, m.search = 0, ""
 	m.rowIdx, m.rowScroll = 0, 0
 	m.rowMem = map[string]int{}
-	if msg.warn != "" {
+	switch {
+	case msg.warn != "":
 		m.toast = msg.warn
-	} else {
+	case m.firstRun:
+		// Said once, in the status bar, instead of a first-run dialog
+		// standing between you and the cluster.
+		m.firstRun = false
+		m.toast = "connected to " + m.src.ClusterInfo().Context +
+			"   ·   /help for keys · /settings for the CLI name and updates"
+	default:
 		m.toast = "connected to " + m.src.ClusterInfo().Context
-	}
-	// A context pinned in config is applied now rather than at Init, since
-	// only now do we know which one we actually landed on.
-	if m.initialCtx != "" {
-		ctx := m.initialCtx
-		m.initialCtx = ""
-		if ctx != m.src.ClusterInfo().Context {
-			return m.switchContextCmd(ctx)
-		}
 	}
 	return nil
 }

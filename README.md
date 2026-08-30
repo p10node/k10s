@@ -120,13 +120,21 @@ k10s --version        # which build is this
 
 ### Every resource, grouped the way you think about them
 
-16 kinds across **Workloads · Network · Config · Storage · Cluster · Custom
-Resources**, each with a live row count for the current namespace. Your CRDs
-are discovered automatically - no configuration.
+30 kinds across **Workloads · Network · Config · Storage · RBAC · Cluster ·
+Custom Resources**, each with a live row count for the current namespace.
+Your CRDs are discovered automatically - no configuration.
 
-Pods · Deployments · StatefulSets · DaemonSets · Jobs · CronJobs · Services ·
-Ingresses · ConfigMaps · Secrets · PVCs · Nodes · Namespaces · Events · CRDs ·
-Custom Resources
+Groups fold: `space`, `left` or a click on the header, remembered across
+restarts, with Config/Storage/RBAC folded to begin with. A folded group also
+asks your cluster for nothing - the sidebar is what decides which kinds get
+counted, and counting is one `limit=1` request per *visible* kind, six at a
+time, with refusals remembered.
+
+Pods · Deployments · ReplicaSets · StatefulSets · DaemonSets · Jobs ·
+CronJobs · HPAs · Services · Endpoints · Ingresses · NetworkPolicies ·
+ConfigMaps · Secrets · ResourceQuotas · LimitRanges · PDBs · PVCs · PVs ·
+StorageClasses · ServiceAccounts · Roles · RoleBindings · ClusterRoles ·
+ClusterRoleBindings · Nodes · Namespaces · Events · CRDs · Custom Resources
 
 ### The whole day-2 toolkit, on single keys
 
@@ -194,8 +202,8 @@ path, so [adding a theme is one struct](docs/themes.md).
 - **An honest loading state** instead of "no resources found" while a watch
   is still syncing.
 - **Namespace and context pickers that never ask you to type a name.**
-- **First-run onboarding** asks what you call kubectl (`kubectl`/`k8s`/`k`/
-  your own alias) and uses it in every hint from then on.
+- **No setup screen.** First run opens the cluster; every setting has a
+  working default and `/settings` is one keystroke away when you want it.
 - **A grow-able prompt** (`ctrl+z`) - because a long kubectl line or an AI
   question does not fit in a one-row field that scrolls sideways.
 - **A terminal-too-small notice** instead of a garbled layout.
@@ -244,22 +252,51 @@ The short version - the [full reference is here](docs/keybindings.md).
 
 ## Commands
 
-Two prefixes, and each one only ever shows its own set. **`/` does
-something. `:` narrows what is on screen.** `enter` runs the highlighted
-suggestion immediately - no second trip through the prompt.
+Two prefixes, and each one only ever shows its own set. **`/` is k10s itself
+(theme, settings, updates). `:` is the cluster, in the k9s vocabulary** - a
+resource view, the namespace, the context, or something acting on what is on
+screen. `enter` runs the highlighted suggestion immediately - no second trip
+through the prompt.
 
 ```
-/ns   /context   /theme   /settings   /update   /version   /help
-:search <term>   :filter <term>   :scale <n>   :mouse
+/theme   /settings   /update   /version   /help        k10s itself
+
+:po  :deploy  :rs  :sts  :ds  :job  :cj  :hpa      workloads
+:svc  :ep  :ing  :netpol                           network
+:cm  :sec  :quota  :limits  :pdb                   config
+:pvc  :pv  :sc                                     storage
+:sa  :role  :rb  :crole  :crb                      rbac
+:no  :ns  :ev  :crd  :cr                           cluster + custom
+
+the short form is what the popup lists; every kind also answers to its
+plural and singular - :pods, :pod, :deployments, :persistentvolumes ...
+and `:aliases` prints the lot
+
+:po kube-system                 that kind, in that namespace (`all` works)
+:svc api                        an argument that is not a namespace filters
+:ns   :ctx                      namespace / context picker
+:ns <name>   :ctx <name>        switch either outright
+:aliases  :search <term>  :filter <term>  :scale <n>  :mouse  :q
 ```
 
-None of `/ns`, `/context` or `/theme` takes a name - each opens a chooser
-showing what actually exists. [Full command reference](docs/commands.md).
+**`/` is k10s, `:` is the cluster** - namespace and context are `:ns` and
+`:ctx`, not `/ns` and `/context`. `:aliases` prints the whole `:` vocabulary.
+
+Anything that is not a `/` or `:` command **runs as a shell command** and its
+output opens in the main panel - `date`, `kubectl get pods -o wide`,
+`helm list`. Run through your own `$SHELL`, capped at 30s, with no terminal
+attached (use `s` on a pod for an interactive shell).
+[Full command reference](docs/commands.md).
 
 ## Config
 
-Theme, context, namespace, AI settings and the update check persist to
-`~/.k10s/config.yaml` (override with `K10S_CONFIG`), saved on every change.
+k10s opens on **kubeconfig's current-context** — the cluster `kubectl` would
+talk to. `:ctx <name>` switches for the session without touching kubeconfig;
+`kubectl config use-context` is what changes where it opens next time.
+
+Theme, namespace, folded sidebar groups, AI settings and the update check
+persist to `~/.k10s/config.yaml` (override with `K10S_CONFIG`), saved on
+every change.
 See [config.md](docs/config.md).
 
 > **Note:** the AI API key is stored as plain text in that file (mode 0600)

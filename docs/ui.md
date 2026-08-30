@@ -32,7 +32,7 @@ Identity on the left, two buttons on the right:
 - **`ns <name> ▾`** opens the **Namespaces table in the main panel**, whose
   row `0` is `all` (real namespaces are then `1..N`, matching the sidebar
   count). `enter` there switches namespace and **returns to whichever kind
-  you came from** — Services if you were looking at Services. `/ns` does the
+  you came from** — Services if you were looking at Services. `:ns` does the
   same;
 - **`theme <name> ⟳`** opens the theme picker (the same one `/theme` shows).
 
@@ -42,12 +42,47 @@ Gauges color by threshold: ok < 60% ≤ warn < 85% ≤ err.
 
 ## Resources pane (left)
 
-16 resource kinds grouped Workloads / Network / Config / Storage / Cluster /
-Custom Resources, each with a row count for the current namespace. Selected
-row: `▸` + accent.
+30 resource kinds grouped Workloads / Network / Config / Storage / RBAC /
+Cluster / Custom Resources, each with a row count for the current namespace.
+Selected row: `▸` + accent. `:po`, `:deploy`, `:pv` … jump straight to one —
+see [commands.md](commands.md).
 
-Only the centre pane scrolls; use clicks, `ctrl+p` or `:search` to change
-kind.
+### Scrolling
+
+The wheel scrolls this pane, but **scrolling never changes the selection** —
+it is looking, not picking, so the main panel stays on the kind you chose.
+That distinction is why the pane used to refuse the wheel outright: when
+scrolling *was* selecting, brushing the wheel on the way to the table swapped
+out the whole view.
+
+`↑`/`↓` in the panel title say which way there is more. Moving the selection
+with the arrow keys drags the window along just far enough to keep it
+visible, its group header included — selection moves the scroll, never the
+other way round.
+
+### Folding groups
+
+Thirty kinds do not fit a laptop-sized sidebar, so the groups people consult
+occasionally — **Config, Storage and RBAC** — start folded, and the choice
+persists (`collapsed` in [config.md](config.md)).
+
+| | |
+|---|---|
+| `space` (list focused) | fold / unfold the group you are standing in |
+| `left`                 | fold it |
+| click a `▾`/`▸` header | either |
+
+A folded header states how many kinds it hides, and keeps the `▸` marker if
+the kind currently open is one of them — folding must never turn "where am
+I" into a guess. Arrow keys walk only what is on screen and never open a
+group you folded; arriving by `:sec`, `ctrl+p` or a search does unfold the
+group it lands in, since the alternative is a table whose sidebar row is
+invisible. **A search ignores folding entirely**: a match hidden behind a
+fold would make the filter look broken.
+
+Folding is not only tidiness. The sidebar is what tells the backend which
+kinds to count, so a folded group stops sending badge-count requests
+altogether — see [performance.md](performance.md).
 
 **Counts.** The live backend only watches kinds you have opened, so counts
 for the rest come from a cheap background sweep (one `limit=1` request per
@@ -59,8 +94,9 @@ while a newly-opened kind syncs. See [performance.md](performance.md).
 name / short name / group, case-insensitive; `↑↓` moves, `enter`/`→` returns
 to the table, `esc` clears. `:search <term>` and `ctrl+p` do the same without
 focusing. The active filter shows in the panel **title** (`Resources · po`)
-and the match counter in the top-right tag (`3/16`). The selection snaps to
-the first match so the centre table follows.
+and the match counter in the top-right tag (`3/30`), alongside the `↑`/`↓`
+scroll hints. The selection snaps to the first match so the centre table
+follows.
 
 ## Main pane (center)
 
@@ -74,7 +110,7 @@ Two modes:
   warn, `Running` ok, `x/y` mismatch warn); a NAMESPACE column renders in
   accent2. Selected row: selection bg, bold on the identity column (NAME, or
   OBJECT for Events — found by header name, not a fixed index, since that
-  column shifts right under `/ns all`).
+  column shifts right under `:ns all`).
 - **Text** — describe / YAML / help render in place with a `[ close ]` tag
   and a bottom scroll bar (`n/total  %  hints`).
 - **Logs** — its own viewer; see below.
@@ -85,7 +121,7 @@ Two modes:
 
 Rows are sorted A→Z by name by default — informer caches return objects in
 arbitrary order, so without this the table would reshuffle on every refresh.
-Sorting is *natural*: `pod-2` comes before `pod-10`. Under `/ns all` rows
+Sorting is *natural*: `pod-2` comes before `pod-10`. Under `:ns all` rows
 group by namespace first, then name.
 
 **Events are the exception** and stay newest-first; sorting them by their
@@ -111,7 +147,7 @@ failing.
 
 ### Contexts
 
-`/context` lists kubeconfig contexts in the main panel, numbered like a
+`:ctx` lists kubeconfig contexts in the main panel, numbered like a
 table and marking the active one `current`. `enter` reconnects. Same idea as
 the namespace chooser: full width beats a cramped popup for names this long.
 
@@ -149,8 +185,8 @@ Opened with `l`, `enter` or a double-click on anything that has logs.
 
 Kinds with no logs of their own fall back to **describe** rather than
 reporting an error — there is nothing the user could do about "this kind has
-no logs". Workloads (Deployment, StatefulSet, DaemonSet, Job) resolve to one
-of their pods, preferring a running one.
+no logs". Workloads (Deployment, ReplicaSet, StatefulSet, DaemonSet, Job)
+resolve to one of their pods, preferring a running one.
 
 ### Loading state
 
@@ -203,9 +239,16 @@ and a `[ grow ]` / `[ shrink ]` button beside it.
 
 Normally one input row. `ctrl+z` — or simply typing something that is not a
 `/` or `:` command — grows it to half the screen and wraps the value across
-the rows, because kubectl lines and AI prompts get long and a sideways-
+the rows, because shell lines and AI prompts get long and a sideways-
 scrolling one-liner hides most of what you typed. `esc` shrinks, `esc` again
-leaves. See [commands.md](commands.md).
+leaves.
+
+In **CMD** mode a line that is not a `/` or `:` command **runs in your
+shell**, and its output opens as a text view titled with the command
+(`$ date`). It runs off the event loop with a 30-second cap and no terminal
+attached, so a hung command costs a spinner and then an error rather than a
+frozen UI — and an interactive one (`vim`, `kubectl exec -it`) simply times
+out; `s` on a pod is the real shell. See [commands.md](commands.md).
 
 ## Overlays
 
@@ -218,7 +261,7 @@ leaves. See [commands.md](commands.md).
 - **Theme picker** (`/theme`): each row carries a swatch of that theme's own
   colors, and moving the cursor **applies the theme immediately** so you see
   it before committing. `esc` restores whatever was active before.
-- **Settings** (`/settings`, and on first run): one dialog with the command
+- **Settings** (`/settings`): one dialog with the command
   names and the AI provider block (radio, Base URL, Model, masked API Key).
   `↑↓` moves, `enter` ticks a name or starts editing a field, clicking a row
   does the same, `tab` reaches Save. Text fields show a blinking caret.

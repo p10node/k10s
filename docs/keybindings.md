@@ -26,7 +26,7 @@
 | `↑` `↓`                           | move (all panes)                                        |
 | `pgup` `pgdn` / `ctrl+b` `ctrl+f` | page                                                    |
 | `g` / `G`                         | first / last                                            |
-| wheel                             | scrolls the centre pane; a popup takes it while open    |
+| wheel                             | scrolls the pane under the pointer; a popup takes it while open |
 
 ## Copy & select
 
@@ -62,15 +62,30 @@ Ctrl, Alt and Shift. In iTerm2, WezTerm or Ghostty you can map Cmd+K to
 other way. The **Actions pane is not in the cycle**: every action already has
 a hotkey and a clickable row, so a tab stop there would lead nowhere.
 
-Clicking a resource row or an action acts on it without moving focus, and
-neither side pane scrolls with the wheel.
+Clicking a resource row or an action acts on it without moving focus. The
+Resources pane scrolls with the wheel **without changing what is selected**
+— scrolling is looking, not picking, so the main panel stays where you left
+it. The Actions pane does not scroll; it is never taller than its list.
 
 ## Resource list (left pane)
 
 `tab` to focus it. Any printable key then filters the list; `↑↓` moves,
 `enter` or `→` returns to the table, `esc` clears. The active filter appears
 in the panel title, with the match counter in its top-right tag.
-`:search <term>` and `ctrl+p` do the same without focusing.
+
+`space` folds or unfolds the group under the cursor and `left` folds it;
+clicking a `▾`/`▸` header does either. Config, Storage and RBAC start folded.
+While a search is running, `space` is a search character and folding is
+ignored — see [ui.md](ui.md#folding-groups).
+
+`:search <term>` and `ctrl+p` filter it without focusing, and a resource
+command (`:po`, `:deploy`, `:ns` — see [commands.md](commands.md)) jumps
+straight to a kind without touching the filter at all.
+
+The wheel scrolls the pane and nothing else: the selection and the main panel
+stay put, and `↑`/`↓` in the panel title say which way there is more. Moving
+the selection with `↑↓` drags the window along far enough to keep it visible,
+group header included.
 
 ## Table row search (`f` from the main pane)
 
@@ -96,7 +111,7 @@ nothing greyed out.
 | `s` | Shell — real interactive exec               | pods                                  |
 | `p` | Port Forward — real, toggles                | pods, services                        |
 | `r` | Rollout Restart                             | deployments, statefulsets, daemonsets |
-| `c` | Scale — opens `/scale <n>`                  | deployments, statefulsets             |
+| `c` | Scale — opens `:scale <n>`                  | deployments, statefulsets, replicasets|
 | `e` | Edit — `$EDITOR` on live YAML               | most                                  |
 | `m` | Top (metrics-server)                        | pods, nodes                           |
 | `o` | Cordon / **Uncordon** (label follows state) | nodes                                 |
@@ -122,8 +137,14 @@ The shell renders inside the main panel, so the rest of k10s stays visible.
 |----------|---------------------------------------------------------------|
 | `ctrl+z` | grow to half the screen / shrink back                         |
 | `esc`    | shrink if grown, otherwise leave the prompt                   |
+| `↑↓`     | move through the suggestion popup                             |
+| `enter`  | run the highlighted command · `tab` completes it instead      |
 
 Typing anything that is not a `/` or `:` command grows the box on its own.
+
+`/` lists the choosers; `:` lists the k9s-style resource commands (`:po`,
+`:deploy`, `:svc`, `:ns` …) plus the ones that act on the open view. Full
+reference in [commands.md](commands.md), and `:aliases` prints it in-app.
 
 ## Log viewer
 
@@ -142,7 +163,7 @@ level tokens are coloured.
 | Overlay        | Open with       | Keys                                                            |
 |----------------|-----------------|-----------------------------------------------------------------|
 | Search palette | `ctrl+p`        | `↑↓` move · `enter` open · `esc` close                          |
-| Context picker | `/context`      | type to filter · `↑↓` · `enter` · `esc`                         |
+| Context picker | `:ctx`          | type to filter · `↑↓` · `enter` · `esc`                         |
 | Theme picker   | `/theme`        | `↑↓` previews live · `tab` Save · `enter` apply · `esc` cancels |
 | Settings       | `/settings`     | `↑↓` · `enter` select/edit or toggle · `←→` toggle · `tab` Save  |
 | Update confirm | `/update`       | `enter` install · `esc` cancel                                   |
@@ -160,5 +181,5 @@ acknowledged even when the action only produces a toast.
 
 Double-clicking a table row opens it, the same as `enter`.
 
-Clicking blank space in the centre pane focuses it. The wheel scrolls only
+Clicking blank space in the centre pane focuses it. The wheel scrolls
 the centre pane.

@@ -164,40 +164,30 @@ func (m *Model) viewList(w, h int) Block {
 	f := m.filtered()
 	ks := m.kinds()
 
-	var lines []string
-	group := ""
-	for _, i := range f {
-		r := ks[i]
-		if r.Group != group {
-			group = r.Group
-			if len(lines) > 0 {
-				lines = append(lines, "")
+	groups := m.groupOrder()
+	groupIdx := func(name string) int {
+		for gi, g := range groups {
+			if g == name {
+				return gi
 			}
-			lines = append(lines, s(th.Subtle).Bold(true).Render(" "+strings.ToUpper(group)))
 		}
-		// A lazily-watching backend only knows counts for kinds already
-		// opened; show nothing rather than a misleading 0.
-		count := ""
-		if n := m.src.RowCount(r.Key, m.namespace); n != domain.CountUnknown {
-			count = strconv.Itoa(n)
+		return 0
+	}
+
+	// One skeleton, shared with the scrolling code (listEntries), so what is
+	// drawn and what the scroll offset counts are the same lines.
+	entries := m.listEntries()
+	lines := make([]string, 0, len(entries))
+	for _, e := range entries {
+		switch {
+		case e.kind < 0 && e.group == "":
+			lines = append(lines, "")
+		case e.group != "":
+			lines = append(lines, m.mark(fmt.Sprintf("grp:%d", groupIdx(e.group)),
+				padBG(m.groupHeader(e.group, e.folded, inner), inner, th.Bg)))
+		default:
+			lines = append(lines, m.kindRow(ks[e.kind], e.kind, inner))
 		}
-		label := trunc(r.Name, inner-4-len(count))
-		gap := inner - 3 - lipgloss.Width(label) - len(count)
-		if gap < 1 {
-			gap = 1
-		}
-		var row string
-		if i == m.resIdx {
-			sel := lipgloss.NewStyle().Background(th.SelBg)
-			row = sel.Foreground(th.Accent).Render(" ▸ ") +
-				sel.Foreground(th.SelFg).Bold(true).Render(label) +
-				sel.Render(spaces(gap)) +
-				sel.Foreground(th.Accent2).Render(count)
-		} else {
-			row = s(th.Bg).Render("   ") + s(th.Fg).Render(label) +
-				s(th.Bg).Render(spaces(gap)) + s(th.Subtle).Render(count)
-		}
-		lines = append(lines, m.mark(fmt.Sprintf("res:%d", i), padBG(row, inner, colorOf(i == m.resIdx, th.SelBg, th.Bg))))
 	}
 	if len(f) == 0 {
 		lines = append(lines, s(th.Subtle).Render(" no match"))
@@ -205,17 +195,18 @@ func (m *Model) viewList(w, h int) Block {
 
 	// No search box here: the list is type-to-filter, so a permanent box was
 	// two wasted rows. The active filter shows in the panel title instead.
+	//
+	// The window comes from the pane's own scroll offset: the wheel moves it
+	// freely, and the selection only drags it along far enough to stay
+	// visible (syncListScroll). Re-centring on the selection every frame
+	// would fight the wheel for control of the pane.
 	avail := h - 2
-	if len(lines) > avail {
-		selLine := 0
-		for idx, ln := range lines {
-			if strings.Contains(ln, "▸") {
-				selLine = idx
-				break
-			}
-		}
-		top := clamp(selLine-avail/2, 0, len(lines)-avail)
-		lines = lines[top : top+avail]
+	total := len(lines)
+	top := m.listTop(total)
+	if total > avail {
+		lines = lines[top:clamp(top+avail, top, total)]
+	} else {
+		top = 0
 	}
 	for len(lines) < avail {
 		lines = append(lines, "")
@@ -226,13 +217,107 @@ func (m *Model) viewList(w, h int) Block {
 		title += " · " + m.search
 	}
 	tag, tagPlain := "", ""
+	// A pane that scrolls has to say so, or the wheel is a feature nobody
+	// finds. The arrows show which way there is more.
+	more := ""
+	if top > 0 {
+		more += "↑"
+	}
+	if top+avail < total {
+		more += "↓"
+	}
 	if focused || m.search != "" {
-		plain := fmt.Sprintf("%d/%d", len(f), len(ks))
-		tag = s(th.Subtle).Render(plain)
-		tagPlain = plain
+		tagPlain = fmt.Sprintf("%d/%d", len(f), len(ks))
+	}
+	if more != "" {
+		if tagPlain != "" {
+			tagPlain += " "
+		}
+		tagPlain += more
+	}
+	if tagPlain != "" {
+		tag = s(th.Subtle).Render(tagPlain)
 	}
 
 	return Panel(th, PanelOpts{Title: title, Tag: tag, TagPlain: tagPlain, Focused: focused, W: w, H: h}, lines)
+}
+
+// kindRow renders one kind in the Resources pane: its name, the badge count
+// when the backend knows it, and the selection highlight.
+func (m *Model) kindRow(r domain.Kind, idx, inner int) string {
+	th := m.th()
+	s := func(c lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
+	}
+
+	// A lazily-watching backend only knows counts for kinds already opened;
+	// show nothing rather than a misleading 0.
+	count := ""
+	if n := m.src.RowCount(r.Key, m.namespace); n != domain.CountUnknown {
+		count = strconv.Itoa(n)
+	}
+	label := trunc(r.Name, inner-4-len(count))
+	gap := inner - 3 - lipgloss.Width(label) - len(count)
+	if gap < 1 {
+		gap = 1
+	}
+
+	var row string
+	if idx == m.resIdx {
+		sel := lipgloss.NewStyle().Background(th.SelBg)
+		row = sel.Foreground(th.Accent).Render(" ▸ ") +
+			sel.Foreground(th.SelFg).Bold(true).Render(label) +
+			sel.Render(spaces(gap)) +
+			sel.Foreground(th.Accent2).Render(count)
+	} else {
+		row = s(th.Bg).Render("   ") + s(th.Fg).Render(label) +
+			s(th.Bg).Render(spaces(gap)) + s(th.Subtle).Render(count)
+	}
+	return m.mark(fmt.Sprintf("res:%d", idx), padBG(row, inner, colorOf(idx == m.resIdx, th.SelBg, th.Bg)))
+}
+
+// groupHeader renders one Resources-pane group line: a chevron saying which
+// way it folds, and — when it is folded — how many kinds are hidden inside,
+// plus the selection marker if the kind you are looking at is one of them.
+// Without that marker a folded group would silently swallow "where am I".
+func (m *Model) groupHeader(group string, folded bool, inner int) string {
+	th := m.th()
+	s := func(c lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
+	}
+
+	holdsCursor := false
+	for _, i := range m.groupKinds(group) {
+		if i == m.resIdx {
+			holdsCursor = true
+			break
+		}
+	}
+
+	chevron, label := "▾", th.Subtle
+	if folded {
+		chevron = "▸"
+		if holdsCursor {
+			label = th.Accent2
+		}
+	}
+	chevCol := th.Border
+	if folded && holdsCursor {
+		chevCol = th.Accent
+	}
+
+	row := s(chevCol).Render(" "+chevron+" ") + s(label).Bold(true).Render(strings.ToUpper(group))
+	if !folded {
+		return row
+	}
+	tag := strconv.Itoa(len(m.groupKinds(group)))
+	gap := inner - lipgloss.Width(row) - len(tag) - 1
+	if gap < 1 {
+		gap = 1
+	}
+	// Subtle, not Border: this is a count you are meant to read, and the
+	// border colour is for the lines around the panel.
+	return row + s(th.Bg).Render(spaces(gap)) + s(th.Subtle).Render(tag)
 }
 
 func colorOf(cond bool, a, b lipgloss.Color) lipgloss.Color {
@@ -427,7 +512,13 @@ func (m *Model) viewMain(w, h int) Block {
 		body = append(body, m.tableSearchBox(inner))
 	}
 
-	title := m.res().Name + " · " + nsLabel
+	// A cluster-scoped kind ignores the namespace entirely, so naming one in
+	// its title only suggests a filter that isn't there — "ClusterRoles ·
+	// default" reads as though switching namespace would change the rows.
+	title := m.res().Name
+	if m.res().Namespaced {
+		title += " · " + nsLabel
+	}
 	if m.rowSearch != "" {
 		title += " · find: " + m.rowSearch
 	}
@@ -702,7 +793,7 @@ func (m *Model) viewPrompt(l layout) Block {
 	sBg := func(c lipgloss.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
 	}
-	if m.pmode == promptAI {
+	if m.pmode == promptAI && !aiDisabled {
 		caret = sBg(th.Accent2).Bold(true).Render(" ✦ ")
 		modePlain = "[ AI · " + m.cfg.model + " ]"
 		modeTag = m.mark("aimode", sBg(th.Border).Render("[ ")+sBg(th.Accent2).Render("AI · "+m.cfg.model)+sBg(th.Border).Render(" ]"))
@@ -719,7 +810,7 @@ func (m *Model) viewPrompt(l layout) Block {
 		if focused {
 			title = "Command · enter run · esc close"
 		}
-		placeholder = "kubectl get pods -A · /ns · :help · ctrl+a for AI"
+		placeholder = "kubectl get pods -A · :po · :ns · /help"
 	}
 
 	m.input.Placeholder = placeholder
@@ -793,9 +884,15 @@ func (m *Model) overlaySuggestions(root Block, l layout, sug []SlashCommand) Blo
 	}
 	inner := w - 2
 
-	var body []string
+	// Only a screenful is drawn, but every match stays reachable: the window
+	// follows the highlight, and the tag says how far down the list it is.
 	cur := clamp(m.sugIdx, 0, len(sug)-1)
-	for i, c := range sug {
+	top := m.sugTop(len(sug))
+	shown := sug[top:clamp(top+m.sugRows(), top, len(sug))]
+
+	var body []string
+	for off, c := range shown {
+		i := top + off
 		selected := i == cur
 		bg := th.Bg
 		if selected {
@@ -809,6 +906,13 @@ func (m *Model) overlaySuggestions(root Block, l layout, sug []SlashCommand) Blo
 			lead = "▸ "
 		}
 		row := st(th.Accent).Render(lead) + st(th.Accent).Bold(true).Render(c.Name)
+		// The spelled-out name next to the short one, so ":po" and ":pods"
+		// are visibly the same command rather than two things to remember.
+		// Same accent as the name it belongs to, just not bold — th.Border
+		// is the colour of box lines and left it barely legible.
+		if c.Full != "" && c.Full != c.Name {
+			row += st(bg).Render(" ") + st(th.Accent).Render(c.Full)
+		}
 		if c.Args != "" {
 			row += st(bg).Render(" ") + st(th.Accent2).Render(c.Args)
 		}
@@ -826,7 +930,18 @@ func (m *Model) overlaySuggestions(root Block, l layout, sug []SlashCommand) Blo
 	if v := m.input.Value(); v != "" && v[0] == ':' {
 		title = "k10s commands  :"
 	}
-	box := Panel(th, PanelOpts{Title: title, W: w, H: h, Focused: true}, body)
+	tag, tagPlain := "", ""
+	if len(shown) < len(sug) {
+		tagPlain = fmt.Sprintf("%d/%d", cur+1, len(sug))
+		if top > 0 {
+			tagPlain = "↑ " + tagPlain
+		}
+		if top+len(shown) < len(sug) {
+			tagPlain += " ↓"
+		}
+		tag = lipgloss.NewStyle().Background(th.Bg).Foreground(th.Subtle).Render(tagPlain)
+	}
+	box := Panel(th, PanelOpts{Title: title, Tag: tag, TagPlain: tagPlain, W: w, H: h, Focused: true}, body)
 	y := l.promptY - h + 1
 	if y < 0 {
 		y = 0
@@ -857,15 +972,27 @@ func (m *Model) overlayConfirm(root Block) Block {
 	}
 	body = append(body, "")
 
+	// A notice has nothing to decline, so it gets one button — offering
+	// "Cancel" against a statement of fact only invites the question of
+	// what cancelling it would do.
 	okPlain, noPlain := "  Enter · Confirm  ", "  Esc · Cancel  "
+	if c.notice {
+		okPlain, noPlain = "  Enter · OK  ", ""
+	}
 	ok := zone.Mark("cf:ok", lipgloss.NewStyle().Background(accent).Foreground(th.Bg).Bold(true).Render(okPlain))
-	no := zone.Mark("cf:no", lipgloss.NewStyle().Background(th.Border).Foreground(th.Fg).Render(noPlain))
 	btnGap := 2
+	row := ok
+	if noPlain != "" {
+		no := zone.Mark("cf:no", lipgloss.NewStyle().Background(th.Border).Foreground(th.Fg).Render(noPlain))
+		row = ok + s(th.Bg).Render(spaces(btnGap)) + no
+	} else {
+		btnGap = 0
+	}
 	pre := (inner - len(okPlain) - len(noPlain) - btnGap) / 2
 	if pre < 1 {
 		pre = 1
 	}
-	body = append(body, s(th.Bg).Render(spaces(pre))+ok+s(th.Bg).Render(spaces(btnGap))+no)
+	body = append(body, s(th.Bg).Render(spaces(pre))+row)
 	body = append(body, "")
 
 	h := len(body) + 2
@@ -873,8 +1000,12 @@ func (m *Model) overlayConfirm(root Block) Block {
 	if c.danger {
 		border = th.Err
 	}
+	mark := "⚠  "
+	if c.notice {
+		mark = "ⓘ  "
+	}
 	box := Panel(th, PanelOpts{
-		Title: "⚠  " + c.title, Focused: true, W: w, H: h, BorderCol: border,
+		Title: mark + c.title, Focused: true, W: w, H: h, BorderCol: border,
 	}, body)
 
 	return root.Overlay(box, (m.w-w)/2, (m.h-h)/2)
@@ -920,7 +1051,7 @@ func (m *Model) zoomedPromptBody(caret string, inner, rows int) []string {
 	}
 
 	hint := " ctrl+z shrink · esc back · enter run"
-	if m.pmode == promptAI {
+	if m.pmode == promptAI && !aiDisabled {
 		hint = " ctrl+z shrink · esc back · enter ask " + m.cfg.model
 	}
 	out = append(out, padBG(s(th.Subtle).Render(trunc(hint, inner)), inner, th.Bg))

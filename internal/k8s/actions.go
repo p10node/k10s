@@ -78,6 +78,9 @@ func (s *Store) Scale(kind, ns, name string, replicas int) (int, error) {
 	case "statefulsets":
 		_, err := s.c.Clientset.AppsV1().StatefulSets(ens).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 		return replicas, err
+	case "replicasets":
+		_, err := s.c.Clientset.AppsV1().ReplicaSets(ens).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+		return replicas, err
 	}
 	return 0, fmt.Errorf("scale is not supported for %s", kind)
 }

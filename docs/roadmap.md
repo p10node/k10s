@@ -32,11 +32,12 @@ undo by accident.
   the open table; the resource list is type-to-filter. Neither side pane
   spends rows on a permanent search box any more.
 - **Namespace / context pickers** — `ns … ▾` in the banner opens the
-  Namespaces table (enter switches and shows pods); `/ns` and `/context`
+  Namespaces table (enter switches and shows pods); `:ns` and `:ctx`
   open compact popups. Neither asks you to type a name.
 - **Theme picker** — `/theme` previews live before committing.
-- **First-run onboarding** — pick the CLI name shown in hints
-  (`kubectl`/`k8s`/`k`/custom); changeable later with `/settings`.
+- **No setup screen** — first run opens the cluster. The CLI name shown in
+  hints (`kubectl`/`k8s`/`k`/custom) defaults to `kubectl` and is changed
+  with `/settings`.
 - **Copy mode** — `ctrl+s` releases the mouse so the terminal can select
   text, the only way to copy out of a mouse-capturing TUI.
 - **Table** — dim row numbers in the gutter, natural A→Z sort by default

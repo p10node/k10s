@@ -123,14 +123,14 @@ func TestKeypressLatency(t *testing.T) {
 	t.Logf("keypress+render: %v per frame", perFrame)
 }
 
-// /ns no longer takes a name — it opens the Namespaces table, which is
-// where the switch actually happens.
+// ":ns" with no name opens the Namespaces table, which is where the switch
+// actually happens.
 func TestNamespaceCommandOpensTable(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
 
-	m.runSlash("/ns")
+	m.runSlash(":ns")
 	if m.curKind().Key != "namespaces" {
-		t.Fatalf("/ns should open the Namespaces table, kind = %q", m.curKind().Key)
+		t.Fatalf(":ns should open the Namespaces table, kind = %q", m.curKind().Key)
 	}
 
 	m.applyNamespace("kube-system")

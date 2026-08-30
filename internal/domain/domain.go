@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// AllNamespaces is the /ns sentinel that shows every namespace at once.
+// AllNamespaces is the :ns sentinel that shows every namespace at once.
 const AllNamespaces = "all"
 
 // ShellSession is a live exec stream: write keystrokes to it, read the

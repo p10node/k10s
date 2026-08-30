@@ -56,6 +56,14 @@ type Store struct {
 	cntNS      string
 	cntRunning bool
 	cntKick    chan struct{}
+	// cntWant is when each kind was last asked about by the render path.
+	// Only kinds on screen are swept, so folding a sidebar group away stops
+	// its requests — see counts.go.
+	cntWant map[string]time.Time
+	// cntGone remembers kinds this cluster will not count (no such API
+	// group, or no permission) and when that was learnt, so a locked-down
+	// cluster isn't asked the same forbidden question every 30 seconds.
+	cntGone map[string]time.Time
 }
 
 type metricSample struct {
@@ -100,6 +108,8 @@ func newStoreFrom(c *Client, apiext apiextclientset.Interface) (*Store, error) {
 		nodeMetrics:   map[string]metricSample{},
 		cnt:           map[string]int{},
 		cntKick:       make(chan struct{}, 1),
+		cntWant:       map[string]time.Time{},
+		cntGone:       map[string]time.Time{},
 	}
 
 	// No informers are registered here and nothing is awaited: construction
@@ -129,6 +139,21 @@ const (
 	kNamespaces  = "namespaces"
 	kEvents      = "events"
 	kCRDs        = "crds"
+
+	kReplicaSets = "replicasets"
+	kHPAs        = "hpas"
+	kEndpoints   = "endpoints"
+	kNetPols     = "networkpolicies"
+	kQuotas      = "resourcequotas"
+	kLimitRanges = "limitranges"
+	kPDBs        = "pdbs"
+	kPVs         = "pvs"
+	kStorageCls  = "storageclasses"
+	kSAs         = "serviceaccounts"
+	kRoles       = "roles"
+	kRoleBinds   = "rolebindings"
+	kClusterRole = "clusterroles"
+	kClusterBind = "clusterrolebindings"
 )
 
 // register wires up the informer for kind without starting it. Calling a
@@ -166,6 +191,34 @@ func (s *Store) register(kind string) cache.SharedIndexInformer {
 		return s.factory.Core().V1().Events().Informer()
 	case kCRDs:
 		return s.apiextFactory.Apiextensions().V1().CustomResourceDefinitions().Informer()
+	case kReplicaSets:
+		return s.factory.Apps().V1().ReplicaSets().Informer()
+	case kHPAs:
+		return s.factory.Autoscaling().V2().HorizontalPodAutoscalers().Informer()
+	case kEndpoints:
+		return s.factory.Core().V1().Endpoints().Informer()
+	case kNetPols:
+		return s.factory.Networking().V1().NetworkPolicies().Informer()
+	case kQuotas:
+		return s.factory.Core().V1().ResourceQuotas().Informer()
+	case kLimitRanges:
+		return s.factory.Core().V1().LimitRanges().Informer()
+	case kPDBs:
+		return s.factory.Policy().V1().PodDisruptionBudgets().Informer()
+	case kPVs:
+		return s.factory.Core().V1().PersistentVolumes().Informer()
+	case kStorageCls:
+		return s.factory.Storage().V1().StorageClasses().Informer()
+	case kSAs:
+		return s.factory.Core().V1().ServiceAccounts().Informer()
+	case kRoles:
+		return s.factory.Rbac().V1().Roles().Informer()
+	case kRoleBinds:
+		return s.factory.Rbac().V1().RoleBindings().Informer()
+	case kClusterRole:
+		return s.factory.Rbac().V1().ClusterRoles().Informer()
+	case kClusterBind:
+		return s.factory.Rbac().V1().ClusterRoleBindings().Informer()
 	}
 	return nil
 }
@@ -393,6 +446,34 @@ func (s *Store) gvrFor(kind string) (schema.GroupVersionResource, bool, error) {
 		return schema.GroupVersionResource{Version: "v1", Resource: "events"}, true, nil
 	case "crds":
 		return schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}, false, nil
+	case "replicasets":
+		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}, true, nil
+	case "hpas":
+		return schema.GroupVersionResource{Group: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"}, true, nil
+	case "endpoints":
+		return schema.GroupVersionResource{Version: "v1", Resource: "endpoints"}, true, nil
+	case "networkpolicies":
+		return schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}, true, nil
+	case "resourcequotas":
+		return schema.GroupVersionResource{Version: "v1", Resource: "resourcequotas"}, true, nil
+	case "limitranges":
+		return schema.GroupVersionResource{Version: "v1", Resource: "limitranges"}, true, nil
+	case "pdbs":
+		return schema.GroupVersionResource{Group: "policy", Version: "v1", Resource: "poddisruptionbudgets"}, true, nil
+	case "pvs":
+		return schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}, false, nil
+	case "storageclasses":
+		return schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}, false, nil
+	case "serviceaccounts":
+		return schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}, true, nil
+	case "roles":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}, true, nil
+	case "rolebindings":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}, true, nil
+	case "clusterroles":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}, false, nil
+	case "clusterrolebindings":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}, false, nil
 	}
 	// CRDs / custom resource instances: resolve via discovered CRD by plural
 	// name embedded as "cr:<group>:<version>:<resource>:<namespaced>".

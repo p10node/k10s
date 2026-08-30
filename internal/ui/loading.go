@@ -46,7 +46,7 @@ func (m *Model) connectingLines(inner int) []string {
 		target = "the cluster"
 	}
 	return m.spinnerBlock(inner, "connecting to "+target+"…",
-		"kubeconfig · API server handshake — /context picks another one")
+		"kubeconfig · API server handshake — :ctx picks another one")
 }
 
 func (m *Model) spinnerBlock(inner int, label, hint string) []string {

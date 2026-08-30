@@ -13,29 +13,59 @@ import (
 
 // dismissOnboarding closes the first-run settings screen so a test can
 // exercise whatever it actually cares about.
+// dismissOnboarding is now only a guard: nothing opens a dialog on first
+// run any more, so this just states that no modal is in the way.
 func dismissOnboarding(m *Model) {
 	m.setOpen = false
 	m.setEditing = false
 	m.onboarded = true
+	m.firstRun = false
 }
 
-func TestSettingsShownOnFirstRunOnly(t *testing.T) {
+// First run opens into the cluster, not into a form. Every setting has a
+// working default, so a dialog in front of the thing you launched is only a
+// thing to dismiss.
+func TestFirstRunOpensTheClusterNotADialog(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
-	if !m.setOpen {
-		t.Fatal("first run should open the settings screen")
+
+	if m.setOpen {
+		t.Error("first run should not open the settings screen")
+	}
+	if m.modalOpen() {
+		t.Error("first run should not open any modal")
+	}
+	if m.cli != config.DefaultCLI {
+		t.Errorf("cli = %q, want the default %q", m.cli, config.DefaultCLI)
+	}
+	if !m.firstRun {
+		t.Error("the session should know it is the first, to say so once")
 	}
 
+	// It is recorded straight away, so the hint is not repeated next time.
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !c.Onboarded {
+		t.Error("the first run was not recorded")
+	}
+	if m2 := New(mock.New("")); m2.firstRun || m2.setOpen {
+		t.Error("the second run should be silent about settings")
+	}
+}
+
+// /settings still opens the same dialog, and it is the only way in now.
+func TestSettingsOpensOnDemand(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+
+	m.runSlash("/settings")
+	if !m.setOpen {
+		t.Fatal("/settings should open the settings screen")
+	}
 	m.handleSettingsKey(key("esc"))
 	if m.setOpen {
-		t.Fatal("esc should close it")
-	}
-
-	m2 := New(mock.New(""))
-	if m2.setOpen {
-		t.Error("settings reappeared after being completed")
-	}
-	if m2.cli != m.cli {
-		t.Errorf("cli not persisted: %q vs %q", m2.cli, m.cli)
+		t.Error("esc should close it")
 	}
 }
 
@@ -88,16 +118,25 @@ func TestClearingTheCustomNameFallsBackToDefault(t *testing.T) {
 }
 
 // Every enabled name is accepted at the prompt.
-func TestAllEnabledCLINamesWorkAtThePrompt(t *testing.T) {
-	m := newTestModel(t, mock.New(""))
-	dismissOnboarding(m)
-
+// A typed line runs as typed: the CLI name is part of the command now, not a
+// prefix to be stripped before guessing what was meant. (The returned tea.Cmd
+// is deliberately never invoked — this asserts what would run, without
+// running kubectl against whatever cluster the test machine can reach.)
+func TestTypedCLILinesRunVerbatim(t *testing.T) {
 	for _, name := range config.CLIPresets {
-		m.runCommand(name + " get nodes")
-		if got := m.curKind().Key; got != "nodes" {
-			t.Errorf("%q was not recognised: kind = %q", name, got)
+		m := newTestModel(t, mock.New(""))
+		dismissOnboarding(m)
+
+		line := name + " get nodes"
+		if cmd := m.runCommand(line); cmd == nil {
+			t.Fatalf("%q produced no command to run", line)
 		}
-		m.selectResource(0) // reset
+		if !strings.Contains(m.busyLabel, "$ "+line) {
+			t.Errorf("busy label = %q, want the whole line %q", m.busyLabel, line)
+		}
+		if got := m.curKind().Key; got == "nodes" {
+			t.Errorf("%q also jumped the sidebar — that guesswork belongs to :no now", line)
+		}
 	}
 }
 
@@ -127,51 +166,24 @@ func TestSettingsCustomCLIValue(t *testing.T) {
 	}
 }
 
-// The merged dialog must carry the AI fields that used to live in /config.
-func TestSettingsHoldsAIFields(t *testing.T) {
+// While the AI prompt is off, the dialog must not offer to configure it —
+// an API key field for a feature that cannot be reached is just a place to
+// leave a secret for nothing.
+func TestSettingsHidesAIFieldsWhileDisabled(t *testing.T) {
+	if !aiDisabled {
+		t.Skip("AI is enabled again — this dialog should carry its fields")
+	}
 	m := newTestModel(t, mock.New(""))
+	m.openSettings()
 
-	m.setRow = rowURL()
-	m.handleSettingsKey(key("enter"))
-	if !m.setEditing {
-		t.Fatal("enter on base url should start editing")
+	if setRows() != 2 {
+		t.Errorf("setRows() = %d, want 2 (custom name + update check)", setRows())
 	}
-	m.input.SetValue("https://example.test/v1")
-	m.handleSettingsKey(key("enter"))
-	if m.cfg.url != "https://example.test/v1" {
-		t.Errorf("base url = %q, want the edited value", m.cfg.url)
-	}
-
-	m.setRow = rowModel()
-	m.handleSettingsKey(key("enter"))
-	m.input.SetValue("some-model")
-	m.handleSettingsKey(key("enter"))
-	if m.cfg.model != "some-model" {
-		t.Errorf("model = %q", m.cfg.model)
-	}
-
-	before := m.cfg.provider
-	m.setRow = rowProvider()
-	m.handleSettingsKey(key("enter"))
-	if m.cfg.provider == before {
-		t.Error("enter on the provider row should toggle it")
-	}
-}
-
-func TestSettingsAPIKeyNeverPreFilled(t *testing.T) {
-	m := newTestModel(t, mock.New(""))
-	m.cfg.key = "sk-secret-value"
-
-	m.setRow = rowKey()
-	m.handleSettingsKey(key("enter"))
-	if m.input.Value() != "" {
-		t.Errorf("api key field pre-filled with %q — a secret must not be echoed back", m.input.Value())
-	}
-
-	// Leaving it empty keeps the existing key rather than wiping it.
-	m.handleSettingsKey(key("enter"))
-	if m.cfg.key != "sk-secret-value" {
-		t.Errorf("api key = %q, want the previous value kept", m.cfg.key)
+	view := stripANSI(m.View())
+	for _, banned := range []string{"AI PROMPT", "api key", "base url"} {
+		if strings.Contains(view, banned) {
+			t.Errorf("settings still shows %q", banned)
+		}
 	}
 }
 
@@ -188,14 +200,17 @@ func TestConfigCommandIsGone(t *testing.T) {
 	}
 }
 
-func TestCLINameUsedInCommandEcho(t *testing.T) {
+// The prompt says what it is running, so the spinner is never anonymous.
+func TestPromptAnnouncesWhatItRuns(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
-	m.cli = "k"
 	dismissOnboarding(m)
 
-	m.runCommand("get pods")
-	if !strings.Contains(m.toast, "$ k get pods") {
-		t.Errorf("toast = %q, want it to use the configured CLI name", m.toast)
+	m.runCommand("date")
+	if !m.busy {
+		t.Error("running a command should show the busy spinner")
+	}
+	if !strings.Contains(m.busyLabel, "$ date") || !strings.Contains(m.toast, "$ date") {
+		t.Errorf("busy = %q, toast = %q, want both to name the command", m.busyLabel, m.toast)
 	}
 }
 

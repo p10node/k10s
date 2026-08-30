@@ -7,31 +7,33 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/p10node/k10s/internal/ai"
 	"github.com/p10node/k10s/internal/config"
 )
 
-// One settings modal covering everything persisted to ~/.k10s/config.yaml:
-// the CLI name used in hints, the AI provider details, and whether k10s
-// looks for a newer release at startup. The first two used to be separate
-// dialogs (/settings and /config), which meant remembering which one held
-// what.
+// One settings modal covering what is persisted to ~/.k10s/config.yaml and
+// still adjustable: the CLI name used in hints, and whether k10s looks for a
+// newer release at startup. It also held the AI provider details until that
+// feature was switched off (aidisabled.go).
 //
-// The same modal is the first-run onboarding, with a different title — a new
-// user sees exactly the screen they will later return to.
+// It opens only when asked (/settings). It used to open itself on first run
+// as an onboarding screen, which put a form in front of the cluster you
+// launched k10s to look at — every field here has a working default, so
+// there was nothing that had to be answered before starting.
 
 // Row layout. The built-in command names are not rows: all of them always
 // work, so there is nothing to choose and a row of checkboxes only invited
 // the question "what happens if I untick these?". The dialog states the
 // fact instead, and offers one row for adding a name of your own.
-func setRows() int { return 6 } // custom name + provider + url + model + key + update check
+//
+// The AI provider fields (provider, base url, model, api key) used to sit
+// between these two. They are gone while the feature is off (see
+// aidisabled.go) — a dialog that offers to configure something unreachable
+// is worse than one that doesn't mention it. The values stay in the config
+// file untouched, so turning the feature back on restores them.
+func setRows() int { return 2 } // custom name + update check
 
-func rowCustom() int   { return 0 }
-func rowProvider() int { return 1 }
-func rowURL() int      { return 2 }
-func rowModel() int    { return 3 }
-func rowKey() int      { return 4 }
-func rowUpdate() int   { return 5 }
+func rowCustom() int { return 0 }
+func rowUpdate() int { return 1 }
 
 const setSaveRow = -1 // sentinel: focus is on Save
 
@@ -44,7 +46,7 @@ func (m *Model) openSettings() {
 func (m *Model) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
-	// An inline text field has focus (custom CLI name, URL, model, key).
+	// An inline text field has focus (the custom CLI name).
 	if m.setEditing {
 		switch key {
 		case "enter", "tab":
@@ -83,10 +85,7 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
 			m.setRow = clamp(m.setRow+1, 0, setRows()-1)
 		}
 	case "left", "right":
-		switch m.setRow {
-		case rowProvider():
-			m.setProvider(1 - m.cfg.provider)
-		case rowUpdate():
+		if m.setRow == rowUpdate() {
 			m.setUpdateChecks(m.updDisabled)
 		}
 	case "enter":
@@ -105,10 +104,6 @@ func (m *Model) activateSettingRow() tea.Cmd {
 	case m.setRow == setSaveRow:
 		return m.closeSettings()
 
-	case m.setRow == rowProvider():
-		m.setProvider(1 - m.cfg.provider)
-		return nil
-
 	case m.setRow == rowUpdate():
 		m.setUpdateChecks(m.updDisabled)
 		return nil
@@ -116,15 +111,8 @@ func (m *Model) activateSettingRow() tea.Cmd {
 	default:
 		// A text field: start editing it.
 		m.setEditing = true
-		switch m.setRow {
-		case rowCustom():
+		if m.setRow == rowCustom() {
 			m.input.SetValue(customSeed(m.cli))
-		case rowURL():
-			m.input.SetValue(m.cfg.url)
-		case rowModel():
-			m.input.SetValue(m.cfg.model)
-		case rowKey():
-			m.input.SetValue("") // never pre-fill a secret
 		}
 		m.input.CursorEnd()
 		// Focus alone doesn't animate the caret — Blink is what keeps it
@@ -137,8 +125,7 @@ func (m *Model) activateSettingRow() tea.Cmd {
 // commitSettingField stores whatever was typed into the field being edited.
 func (m *Model) commitSettingField() {
 	v := strings.TrimSpace(m.input.Value())
-	switch m.setRow {
-	case rowCustom():
+	if m.setRow == rowCustom() {
 		// Empty clears the custom name and falls back to the default.
 		if v == "" {
 			m.cli = config.DefaultCLI
@@ -146,14 +133,6 @@ func (m *Model) commitSettingField() {
 			m.cli = v
 		}
 		m.syncCLINames()
-	case rowURL():
-		m.cfg.url = v
-	case rowModel():
-		m.cfg.model = v
-	case rowKey():
-		if v != "" {
-			m.cfg.key = v
-		}
 	}
 	m.input.SetValue("")
 }
@@ -167,27 +146,12 @@ func (m *Model) closeSettings() tea.Cmd {
 		m.cli = config.DefaultCLI
 	}
 	m.syncCLINames()
-	first := !m.onboarded
-	m.onboarded = true
 	m.setOpen = false
 	m.input.SetValue("")
 	m.input.Blur()
 	m.saveConfig()
-
-	if first {
-		m.toast = "cli → " + m.cli + "   ·   change it any time with /settings"
-	} else {
-		m.toast = "settings saved → " + config.Path()
-	}
+	m.toast = "settings saved → " + config.Path()
 	return nil
-}
-
-func (m *Model) setProvider(p int) {
-	m.cfg.provider = p
-	m.cfg.url = ai.Providers[p].URL
-	m.cfg.model = ai.Providers[p].Model
-	m.saveConfig()
-	m.toast = "provider → " + ai.Providers[p].Label
 }
 
 // customSeed is what the custom-name field starts with. Pre-filling one of
@@ -219,23 +183,11 @@ func isPreset(v string) bool {
 	return false
 }
 
-// stripCLIPrefix removes a leading CLI name so every enabled alias is
-// accepted at the prompt: "kubectl get pods", "k get pods" and
-// "k8s get pods" are the same command.
-func stripCLIPrefix(cmd string, names []string) string {
-	head, rest, ok := strings.Cut(strings.TrimSpace(cmd), " ")
-	if !ok {
-		return cmd
-	}
-	for _, n := range names {
-		if n != "" && head == n {
-			return rest
-		}
-	}
-	return cmd
-}
+// The prompt no longer strips a leading CLI name: a typed line is run as
+// typed, so "kubectl get pods" has to reach kubectl intact. What the name
+// still does is label the hints and the command echoes.
 
-// cliEnabled reports whether a name is accepted at the prompt.
+// cliEnabled reports whether a name is one k10s recognises.
 func (m *Model) cliEnabled(name string) bool {
 	return slices.Contains(m.clis, name)
 }

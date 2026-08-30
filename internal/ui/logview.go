@@ -22,8 +22,13 @@ import (
 // Long lines wrap rather than being cut off with an ellipsis: a truncated
 // log line is often exactly the part you needed.
 
-// logChunk is the page size: the viewer opens with the newest 500 lines and
-// each scroll back past the top asks for 500 older ones, indefinitely.
+// logInitial is what the viewer opens with: the newest 200 lines. Enough to
+// see what a pod is doing right now, and small enough that the view is up
+// and pinned to the bottom immediately rather than after a long fetch.
+const logInitial = 200
+
+// logChunk is the paging size: each scroll back past the oldest loaded line
+// asks for this many more, indefinitely.
 const logChunk = 500
 
 // wrapLine breaks s into segments of at most w cells, splitting on spaces
@@ -153,8 +158,8 @@ func (m *Model) logBody(inner, rows int) []string {
 
 	// Numbers count up from the newest line, so the gutter width follows
 	// the oldest number on screen rather than the total.
-	numW := clamp(len(fmt.Sprint(len(m.textLines))), 2, 6)
-	textW := maxi(8, inner-numW-3)
+	numW := m.logGutterWidth()
+	textW := m.logTextWidth(inner)
 
 	// Build display rows newest-first, then reverse: wrapping means one log
 	// line can occupy several rows, so the window has to be filled from the
@@ -204,11 +209,48 @@ func (m *Model) logBody(inner, rows int) []string {
 	return out
 }
 
+// logGutterWidth is the width of the line-number column, which grows with
+// the number of loaded lines.
+func (m *Model) logGutterWidth() int {
+	return clamp(len(fmt.Sprint(len(m.textLines))), 2, 6)
+}
+
+// logTextWidth is the column the log text itself is rendered into: the
+// panel's inner width less the gutter. Passing inner explicitly lets the
+// renderer use the width it was handed; logCurrentWidth derives it for the
+// scroll bookkeeping, which runs outside a render.
+func (m *Model) logTextWidth(inner int) int {
+	return maxi(8, inner-m.logGutterWidth()-3)
+}
+
+// logCurrentWidth is the text width the log panel is being drawn at right
+// now, matching what viewMain hands logBody.
+func (m *Model) logCurrentWidth() int {
+	return m.logTextWidth(m.layout().mainW - 2)
+}
+
+// logRows is how many screen rows a log line occupies once wrapped. Scroll
+// offsets are counted in display rows, not log lines, so a wrapped line has
+// to count for every row it takes up.
+func (m *Model) logRows(s string) int {
+	return len(wrapLine(s, m.logCurrentWidth()))
+}
+
+// logTotalRows is the height of the whole loaded log in display rows.
+func (m *Model) logTotalRows() int {
+	w := m.logCurrentWidth()
+	n := 0
+	for _, ln := range m.textLines {
+		n += len(wrapLine(ln, w))
+	}
+	return n
+}
+
 // logScrollBy moves the log view, managing follow state. delta > 0 moves
 // toward older entries (up the screen). Reaching the top of what is loaded
 // asks for more, which is what makes scrolling up feel endless.
 func (m *Model) logScrollBy(delta int) {
-	maxScroll := maxi(0, len(m.textLines)-1)
+	maxScroll := maxi(0, m.logTotalRows()-1)
 	m.logScroll = clamp(m.logScroll+delta, 0, maxScroll)
 	// Pinned to the bottom means following; anywhere else means paused.
 	m.logFollow = m.logScroll == 0
@@ -223,7 +265,7 @@ func (m *Model) logScrollBy(delta int) {
 func (m *Model) logNeedsOlder() bool {
 	const prefetch = 40
 	return m.logMore && !m.logLoading &&
-		m.logScroll+m.visibleRows()+prefetch >= len(m.textLines)
+		m.logScroll+m.visibleRows()+prefetch >= m.logTotalRows()
 }
 
 // logStatusLine reports follow state, how much is loaded, and whether older
@@ -239,7 +281,7 @@ func (m *Model) logStatusLine(inner int) string {
 		left = s(th.Ok).Bold(true).Render(" ● following") + s(th.Subtle).Render("  newest at bottom")
 	} else {
 		left = s(th.Warn).Bold(true).Render(" ⏸ paused") +
-			s(th.Subtle).Render(fmt.Sprintf("  %d line(s) below · end resumes", m.logScroll))
+			s(th.Subtle).Render(fmt.Sprintf("  %d row(s) below · end resumes", m.logScroll))
 	}
 
 	right := fmt.Sprintf("%d loaded", len(m.textLines))

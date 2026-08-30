@@ -176,6 +176,29 @@ func TestPausedViewHoldsStillAsLinesArrive(t *testing.T) {
 	}
 }
 
+// A wrapped line takes several display rows, and the paused offset counts
+// display rows — so it has to grow by all of them or the view creeps.
+func TestPausedViewHoldsStillForWrappedLines(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	openLogs(t, m)
+
+	m.move(-5)
+	before := m.logScroll
+
+	long := strings.Repeat("wrapped line content ", 40)
+	want := len(wrapLine(long, m.logCurrentWidth()))
+	if want < 2 {
+		t.Fatalf("test line only occupies %d row(s) — it must wrap", want)
+	}
+	m.Update(logLineMsg{gen: m.logGen, line: long, ok: true})
+
+	if m.logScroll != before+want {
+		t.Errorf("logScroll = %d, want %d — a wrapped line must push by every row it takes",
+			m.logScroll, before+want)
+	}
+}
+
 func TestFollowingAppendsAtBottom(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
 	dismissOnboarding(m)
@@ -522,8 +545,8 @@ func TestEachPageBackLoadsAnotherChunk(t *testing.T) {
 	dismissOnboarding(m)
 	openLogs(t, m)
 
-	if len(m.textLines) != logChunk {
-		t.Fatalf("opened with %d lines, want the newest %d", len(m.textLines), logChunk)
+	if len(m.textLines) != logInitial {
+		t.Fatalf("opened with %d lines, want the newest %d", len(m.textLines), logInitial)
 	}
 	if !m.logMore {
 		t.Skip("demo log is not deep enough to page")
@@ -531,8 +554,8 @@ func TestEachPageBackLoadsAnotherChunk(t *testing.T) {
 
 	m.logScroll = len(m.textLines) - 5
 	drainCmd(m, m.maybeLoadOlder())
-	if got := len(m.textLines); got != 2*logChunk {
-		t.Errorf("after one page back: %d lines, want %d", got, 2*logChunk)
+	if got := len(m.textLines); got != logInitial+logChunk {
+		t.Errorf("after one page back: %d lines, want %d", got, logInitial+logChunk)
 	}
 }
 

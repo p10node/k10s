@@ -225,12 +225,12 @@ func TestNSCommandOpensTableNotPopup(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
 	dismissOnboarding(m)
 
-	m.runSlash("/ns")
+	m.runSlash(":ns")
 	if m.curKind().Key != "namespaces" {
-		t.Errorf("/ns should open the Namespaces table, kind = %q", m.curKind().Key)
+		t.Errorf(":ns should open the Namespaces table, kind = %q", m.curKind().Key)
 	}
 	if m.modalOpen() {
-		t.Error("/ns should not open a popup any more")
+		t.Error(":ns should not open a popup any more")
 	}
 }
 

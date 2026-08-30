@@ -31,7 +31,7 @@ a `domain.Source` that serves what kubeconfig already knows — the kind list,
 the context list — and answers `errConnecting` to everything else. The main
 panel shows a spinner meanwhile, so an API server behind a downed VPN, or an
 exec credential plugin that stalls, leaves a working UI on screen instead of
-a blank terminal. Picking a context in `/context` during that wait retargets
+a blank terminal. Picking a context in `:ctx` during that wait retargets
 the connection rather than switching from a backend that isn't there yet;
 each attempt carries a generation, so a slow first one landing later is
 dropped instead of overwriting the newer one.
@@ -43,7 +43,7 @@ dropped instead of overwriting the newer one.
 | `client.go`          | kubeconfig loading, clientset/dynamic/discovery/metrics |
 | `store.go`           | the Store, lazy informer registry, metrics polling      |
 | `listers.go`         | lazy per-kind lister accessors                          |
-| `kinds.go`           | the 16 kinds, their columns and allowed actions         |
+| `kinds.go`           | the 30 kinds, their columns and allowed actions         |
 | `rows.go`            | object → row formatting, sorting, namespace filtering   |
 | `counts.go`          | cheap background counts for unopened kinds              |
 | `describe.go`        | kubectl's own describers, generic fallback for CRs      |
@@ -68,6 +68,15 @@ watch connections and kill them.
 Table data comes from client-go informers, which keep a local cache warm off
 a watch. Informers are started **lazily, per kind** — see
 [performance.md](performance.md).
+
+Adding a kind means touching five places, all of them switch-shaped so a
+missing one fails loudly: `kinds.go` (entry, columns, allowed actions),
+`store.go` (informer registration + its GroupVersionResource, which is what
+YAML/edit/delete/badge counts all resolve through), `listers.go` (the lazy
+lister accessor), `rows.go` (object → row, plus the `RowCount` case), and
+`describe.go` (the GroupKind kubectl's describer is registered under). Then
+mirror it in `internal/mock` — `TestBackendsServeTheSameKinds` fails if you
+don't — and give it aliases in `internal/ui/commands.go`.
 
 `Describe` uses kubectl's own describers (`kubectl/pkg/describe`) so output
 matches `kubectl describe`, with a generic unstructured describer for CRDs
@@ -95,8 +104,9 @@ and custom resources. `YAML` goes through the dynamic client and strips
   backwards cursor, so "older" means re-reading with a larger tail.
   `LogsFollow` then streams new lines over a channel; the UI tags each with a
   generation number so a stale stream can't append into a view you've left.
-  Workloads resolve to one of their pods via the workload's label selector,
-  preferring a running one. Kinds with no logs return `domain.ErrNoLogs`,
+  Workloads (Deployment, StatefulSet, DaemonSet, Job, ReplicaSet) resolve to
+  one of their pods via the workload's label selector, preferring a running
+  one. Kinds with no logs return `domain.ErrNoLogs`,
   which the UI treats as "show describe instead", not as a failure.
 - **Exec** — `ShellSession` opens an interactive exec and hands back a
   writer for keystrokes plus a channel of raw output bytes, so the UI can
@@ -116,7 +126,8 @@ reads its cache.
 
 ## Offline demo — `internal/mock`
 
-Static, in-memory fake cluster: 16 kinds, three nodes (one NotReady), and
+Static, in-memory fake cluster: the same 30 kinds, three nodes (one
+NotReady), and
 rows seeded with deliberate trouble — `billing-worker` in CrashLoopBackOff
 ×17, a `payment-api` pod Pending on insufficient CPU, a Terminating pod — so
 status colors and events have something real to point at.
@@ -127,7 +138,7 @@ It backs:
 - k10s itself when no cluster is reachable.
 
 A resource's base `Rows` are implicitly namespace `default`; `Extra` holds
-rows tagged with another namespace, which is what makes `/ns` switching show
+rows tagged with another namespace, which is what makes `:ns` switching show
 genuinely different data. `argocd` / `cert-manager` only carry Custom
 Resource instances.
 

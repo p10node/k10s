@@ -9,10 +9,13 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -59,7 +62,7 @@ func applyNamespaceOpt(cols []string, rows []nsRow, ns string, sorted bool) ([]s
 			out = append(out, append([]string{r.ns}, r.row...))
 		}
 		if sorted {
-			// Under /ns all, group by namespace then name so related objects
+			// Under :ns all, group by namespace then name so related objects
 			// stay together instead of interleaving. NAMESPACE was just
 			// prepended, so it is column 0 and the name is column 1.
 			sortRows(out, 0, 1)
@@ -138,6 +141,34 @@ func (s *Store) Rows(kind, ns string) ([]string, [][]string) {
 		return k.Cols, s.crdRows()
 	case "customresources":
 		return applyNamespace(k.Cols, s.customResourceRows(), ns)
+	case "replicasets":
+		return applyNamespace(k.Cols, s.rsRows(), ns)
+	case "hpas":
+		return applyNamespace(k.Cols, s.hpaRows(), ns)
+	case "endpoints":
+		return applyNamespace(k.Cols, s.endpointRows(), ns)
+	case "networkpolicies":
+		return applyNamespace(k.Cols, s.netPolRows(), ns)
+	case "resourcequotas":
+		return applyNamespace(k.Cols, s.quotaRows(), ns)
+	case "limitranges":
+		return applyNamespace(k.Cols, s.limitRangeRows(), ns)
+	case "pdbs":
+		return applyNamespace(k.Cols, s.pdbRows(), ns)
+	case "serviceaccounts":
+		return applyNamespace(k.Cols, s.saRows(), ns)
+	case "roles":
+		return applyNamespace(k.Cols, s.roleRows(), ns)
+	case "rolebindings":
+		return applyNamespace(k.Cols, s.roleBindingRows(), ns)
+	case "pvs":
+		return k.Cols, s.pvRows()
+	case "storageclasses":
+		return k.Cols, s.storageClassRows()
+	case "clusterroles":
+		return k.Cols, s.clusterRoleRows()
+	case "clusterrolebindings":
+		return k.Cols, s.clusterRoleBindingRows()
 	}
 	return k.Cols, nil
 }
@@ -174,6 +205,9 @@ func (s *Store) RowCount(kind, ns string) int {
 	if kind == "customresources" {
 		// Custom resources have no informer; they're refreshed off-thread.
 		// Report whatever the last background sweep found, never block.
+		// Saying so here is also what starts that sweep — it costs a LIST
+		// per CRD, so it waits until this badge is actually on screen.
+		s.noteInterest(kind, ns)
 		s.crMu.Lock()
 		cached, ok := s.crCache, !s.crAt.IsZero()
 		s.crMu.Unlock()
@@ -191,7 +225,7 @@ func (s *Store) RowCount(kind, ns string) int {
 	//     to "0" for a second before snapping back to the real number.
 	// Showing the last known count through the load is far less jarring.
 	if !s.isStarted(kind) || !s.Synced(kind) {
-		s.noteInterest(ns)
+		s.noteInterest(kind, ns)
 		if n, ok := s.cachedCount(kind, ns); ok {
 			return n
 		}
@@ -243,6 +277,48 @@ func (s *Store) RowCount(kind, ns string) int {
 		return len(items)
 	case kCRDs:
 		items, _ := s.crdLister().List(labels.Everything())
+		return len(items)
+	case kReplicaSets:
+		items, _ := s.rsLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kHPAs:
+		items, _ := s.hpaLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kEndpoints:
+		items, _ := s.endpointsLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kNetPols:
+		items, _ := s.netPolLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kQuotas:
+		items, _ := s.quotaLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kLimitRanges:
+		items, _ := s.limitRangeLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kPDBs:
+		items, _ := s.pdbLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kSAs:
+		items, _ := s.saLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kRoles:
+		items, _ := s.roleLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kRoleBinds:
+		items, _ := s.roleBindingLister().List(labels.Everything())
+		return countNS(items, ns)
+	case kPVs:
+		items, _ := s.pvLister().List(labels.Everything())
+		return len(items)
+	case kStorageCls:
+		items, _ := s.storageClassLister().List(labels.Everything())
+		return len(items)
+	case kClusterRole:
+		items, _ := s.clusterRoleLister().List(labels.Everything())
+		return len(items)
+	case kClusterBind:
+		items, _ := s.clusterRoleBindingLister().List(labels.Everything())
 		return len(items)
 	}
 	return domain.CountUnknown
@@ -740,3 +816,433 @@ var (
 	_ = batchv1.Job{}
 	_ = networkingv1.Ingress{}
 )
+
+// ---- workloads and policy the k9s vocabulary reaches -----------------------
+//
+// Everything below mirrors what `kubectl get <kind>` prints for the same
+// object, condensed to the columns declared in kinds.go. They are all shaped
+// the same way: read the (lazily started) lister, format, hand back nsRow so
+// applyNamespace can do the namespace filtering.
+
+func (s *Store) rsRows() []nsRow {
+	items, _ := s.rsLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, rs := range items {
+		desired := int32(0)
+		if rs.Spec.Replicas != nil {
+			desired = *rs.Spec.Replicas
+		}
+		row := []string{
+			rs.Name, strconv.Itoa(int(desired)), strconv.Itoa(int(rs.Status.Replicas)),
+			strconv.Itoa(int(rs.Status.ReadyReplicas)), age(rs.CreationTimestamp.Time),
+		}
+		out = append(out, nsRow{rs.Namespace, row})
+	}
+	return out
+}
+
+func (s *Store) hpaRows() []nsRow {
+	items, _ := s.hpaLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, h := range items {
+		min := "-"
+		if h.Spec.MinReplicas != nil {
+			min = strconv.Itoa(int(*h.Spec.MinReplicas))
+		}
+		ref := h.Spec.ScaleTargetRef.Kind + "/" + h.Spec.ScaleTargetRef.Name
+		row := []string{
+			h.Name, ref, hpaTargets(h), min, strconv.Itoa(int(h.Spec.MaxReplicas)),
+			strconv.Itoa(int(h.Status.CurrentReplicas)), age(h.CreationTimestamp.Time),
+		}
+		out = append(out, nsRow{h.Namespace, row})
+	}
+	return out
+}
+
+// hpaTargets renders "current/target" per metric the way kubectl's TARGETS
+// column does, keeping only the first two so one autoscaler with six metrics
+// can't push every other column off the table.
+func hpaTargets(h *autoscalingv2.HorizontalPodAutoscaler) string {
+	current := map[string]string{}
+	for _, m := range h.Status.CurrentMetrics {
+		name, val := metricNameValue(m.Type, m.Resource, m.Pods, m.Object, m.External)
+		if name != "" {
+			current[name] = val
+		}
+	}
+
+	var parts []string
+	for _, m := range h.Spec.Metrics {
+		name, target := metricSpecNameTarget(m)
+		if name == "" {
+			continue
+		}
+		cur, ok := current[name]
+		if !ok || cur == "" {
+			cur = "<unknown>"
+		}
+		parts = append(parts, name+": "+cur+"/"+target)
+	}
+	if len(parts) == 0 {
+		return "<none>"
+	}
+	if len(parts) > 2 {
+		parts = append(parts[:2], fmt.Sprintf("+%d more", len(parts)-2))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func metricNameValue(t autoscalingv2.MetricSourceType, res *autoscalingv2.ResourceMetricStatus,
+	pods *autoscalingv2.PodsMetricStatus, obj *autoscalingv2.ObjectMetricStatus,
+	ext *autoscalingv2.ExternalMetricStatus) (string, string) {
+	switch t {
+	case autoscalingv2.ResourceMetricSourceType:
+		if res == nil {
+			return "", ""
+		}
+		if res.Current.AverageUtilization != nil {
+			return string(res.Name), strconv.Itoa(int(*res.Current.AverageUtilization)) + "%"
+		}
+		if res.Current.AverageValue != nil {
+			return string(res.Name), res.Current.AverageValue.String()
+		}
+		return string(res.Name), "<unknown>"
+	case autoscalingv2.PodsMetricSourceType:
+		if pods == nil {
+			return "", ""
+		}
+		return pods.Metric.Name, quantityOrUnknown(pods.Current.AverageValue)
+	case autoscalingv2.ObjectMetricSourceType:
+		if obj == nil {
+			return "", ""
+		}
+		return obj.Metric.Name, quantityOrUnknown(obj.Current.Value)
+	case autoscalingv2.ExternalMetricSourceType:
+		if ext == nil {
+			return "", ""
+		}
+		return ext.Metric.Name, quantityOrUnknown(ext.Current.Value)
+	}
+	return "", ""
+}
+
+func metricSpecNameTarget(m autoscalingv2.MetricSpec) (string, string) {
+	target := func(t autoscalingv2.MetricTarget) string {
+		if t.AverageUtilization != nil {
+			return strconv.Itoa(int(*t.AverageUtilization)) + "%"
+		}
+		if t.AverageValue != nil {
+			return t.AverageValue.String()
+		}
+		return quantityOrUnknown(t.Value)
+	}
+	switch m.Type {
+	case autoscalingv2.ResourceMetricSourceType:
+		if m.Resource == nil {
+			return "", ""
+		}
+		return string(m.Resource.Name), target(m.Resource.Target)
+	case autoscalingv2.PodsMetricSourceType:
+		if m.Pods == nil {
+			return "", ""
+		}
+		return m.Pods.Metric.Name, target(m.Pods.Target)
+	case autoscalingv2.ObjectMetricSourceType:
+		if m.Object == nil {
+			return "", ""
+		}
+		return m.Object.Metric.Name, target(m.Object.Target)
+	case autoscalingv2.ExternalMetricSourceType:
+		if m.External == nil {
+			return "", ""
+		}
+		return m.External.Metric.Name, target(m.External.Target)
+	}
+	return "", ""
+}
+
+func quantityOrUnknown(q *apiresource.Quantity) string {
+	if q == nil {
+		return "<unknown>"
+	}
+	return q.String()
+}
+
+func (s *Store) endpointRows() []nsRow {
+	items, _ := s.endpointsLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, ep := range items {
+		var addrs []string
+		total := 0
+		for _, sub := range ep.Subsets {
+			for _, a := range sub.Addresses {
+				total++
+				if len(addrs) < 3 {
+					if len(sub.Ports) > 0 {
+						addrs = append(addrs, fmt.Sprintf("%s:%d", a.IP, sub.Ports[0].Port))
+					} else {
+						addrs = append(addrs, a.IP)
+					}
+				}
+			}
+		}
+		list := strings.Join(addrs, ",")
+		switch {
+		case total == 0:
+			list = "<none>"
+		case total > len(addrs):
+			list += fmt.Sprintf(" +%d more", total-len(addrs))
+		}
+		out = append(out, nsRow{ep.Namespace, []string{ep.Name, list, age(ep.CreationTimestamp.Time)}})
+	}
+	return out
+}
+
+func (s *Store) netPolRows() []nsRow {
+	items, _ := s.netPolLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, np := range items {
+		out = append(out, nsRow{np.Namespace, []string{
+			np.Name, selectorString(&np.Spec.PodSelector), age(np.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+// selectorString renders a label selector the way kubectl does, with
+// "<none>" for the empty selector that matches everything.
+func selectorString(sel *metav1.LabelSelector) string {
+	if sel == nil {
+		return "<none>"
+	}
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil || s.Empty() {
+		return "<none>"
+	}
+	return s.String()
+}
+
+func (s *Store) quotaRows() []nsRow {
+	items, _ := s.quotaLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, q := range items {
+		out = append(out, nsRow{q.Namespace, []string{
+			q.Name, quotaUsage(q, "requests."), quotaUsage(q, "limits."), age(q.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+// quotaUsage summarises "used/hard" for the request or limit half of a quota,
+// which is what kubectl's REQUEST and LIMIT columns show.
+func quotaUsage(q *corev1.ResourceQuota, prefix string) string {
+	names := make([]string, 0, len(q.Status.Hard))
+	for name := range q.Status.Hard {
+		if strings.HasPrefix(string(name), prefix) {
+			names = append(names, string(name))
+		}
+	}
+	if len(names) == 0 {
+		return "-"
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		hard := q.Status.Hard[corev1.ResourceName(name)]
+		used := "0"
+		if u, ok := q.Status.Used[corev1.ResourceName(name)]; ok {
+			used = u.String()
+		}
+		parts = append(parts, strings.TrimPrefix(name, prefix)+": "+used+"/"+hard.String())
+	}
+	if len(parts) > 2 {
+		parts = append(parts[:2], fmt.Sprintf("+%d more", len(parts)-2))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (s *Store) limitRangeRows() []nsRow {
+	items, _ := s.limitRangeLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, lr := range items {
+		types := make([]string, 0, len(lr.Spec.Limits))
+		for _, l := range lr.Spec.Limits {
+			types = append(types, string(l.Type))
+		}
+		list := strings.Join(types, ",")
+		if list == "" {
+			list = "<none>"
+		}
+		out = append(out, nsRow{lr.Namespace, []string{lr.Name, list, age(lr.CreationTimestamp.Time)}})
+	}
+	return out
+}
+
+func (s *Store) pdbRows() []nsRow {
+	items, _ := s.pdbLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, p := range items {
+		minAvail, maxUnavail := "N/A", "N/A"
+		if p.Spec.MinAvailable != nil {
+			minAvail = p.Spec.MinAvailable.String()
+		}
+		if p.Spec.MaxUnavailable != nil {
+			maxUnavail = p.Spec.MaxUnavailable.String()
+		}
+		out = append(out, nsRow{p.Namespace, []string{
+			p.Name, minAvail, maxUnavail, strconv.Itoa(int(p.Status.DisruptionsAllowed)),
+			age(p.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+// ---- RBAC ------------------------------------------------------------------
+
+func (s *Store) saRows() []nsRow {
+	items, _ := s.saLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, sa := range items {
+		out = append(out, nsRow{sa.Namespace, []string{
+			sa.Name, strconv.Itoa(len(sa.Secrets)), age(sa.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+func (s *Store) roleRows() []nsRow {
+	items, _ := s.roleLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, r := range items {
+		out = append(out, nsRow{r.Namespace, []string{
+			r.Name, strconv.Itoa(len(r.Rules)), age(r.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+func (s *Store) roleBindingRows() []nsRow {
+	items, _ := s.roleBindingLister().List(labels.Everything())
+	out := make([]nsRow, 0, len(items))
+	for _, rb := range items {
+		out = append(out, nsRow{rb.Namespace, []string{
+			rb.Name, rb.RoleRef.Kind + "/" + rb.RoleRef.Name, subjectList(rb.Subjects),
+			age(rb.CreationTimestamp.Time),
+		}})
+	}
+	return out
+}
+
+func (s *Store) clusterRoleRows() [][]string {
+	items, _ := s.clusterRoleLister().List(labels.Everything())
+	out := make([][]string, 0, len(items))
+	for _, r := range items {
+		out = append(out, []string{r.Name, strconv.Itoa(len(r.Rules)), age(r.CreationTimestamp.Time)})
+	}
+	sortRows(out, 0)
+	return out
+}
+
+func (s *Store) clusterRoleBindingRows() [][]string {
+	items, _ := s.clusterRoleBindingLister().List(labels.Everything())
+	out := make([][]string, 0, len(items))
+	for _, rb := range items {
+		out = append(out, []string{
+			rb.Name, rb.RoleRef.Kind + "/" + rb.RoleRef.Name, subjectList(rb.Subjects),
+			age(rb.CreationTimestamp.Time),
+		})
+	}
+	sortRows(out, 0)
+	return out
+}
+
+// subjectList names who a binding grants to, capped so a binding with fifty
+// service accounts stays one readable row.
+func subjectList(subjects []rbacv1.Subject) string {
+	if len(subjects) == 0 {
+		return "<none>"
+	}
+	names := make([]string, 0, len(subjects))
+	for _, s := range subjects {
+		names = append(names, s.Name)
+	}
+	if len(names) > 2 {
+		return strings.Join(names[:2], ",") + fmt.Sprintf(" +%d more", len(names)-2)
+	}
+	return strings.Join(names, ",")
+}
+
+// ---- cluster-scoped storage ------------------------------------------------
+
+func (s *Store) pvRows() [][]string {
+	items, _ := s.pvLister().List(labels.Everything())
+	out := make([][]string, 0, len(items))
+	for _, pv := range items {
+		capacity := "-"
+		if q, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
+			capacity = q.String()
+		}
+		claim := "<none>"
+		if pv.Spec.ClaimRef != nil {
+			claim = pv.Spec.ClaimRef.Namespace + "/" + pv.Spec.ClaimRef.Name
+		}
+		sc := pv.Spec.StorageClassName
+		if sc == "" {
+			sc = "<none>"
+		}
+		out = append(out, []string{
+			pv.Name, capacity, accessModes(pv.Spec.AccessModes), string(pv.Spec.PersistentVolumeReclaimPolicy),
+			string(pv.Status.Phase), claim, sc, age(pv.CreationTimestamp.Time),
+		})
+	}
+	sortRows(out, 0)
+	return out
+}
+
+// accessModes abbreviates the way kubectl does: RWO/ROX/RWX/RWOP.
+func accessModes(modes []corev1.PersistentVolumeAccessMode) string {
+	short := map[corev1.PersistentVolumeAccessMode]string{
+		corev1.ReadWriteOnce:    "RWO",
+		corev1.ReadOnlyMany:     "ROX",
+		corev1.ReadWriteMany:    "RWX",
+		corev1.ReadWriteOncePod: "RWOP",
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range modes {
+		s, ok := short[m]
+		if !ok {
+			s = string(m)
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return "-"
+	}
+	return strings.Join(out, ",")
+}
+
+func (s *Store) storageClassRows() [][]string {
+	items, _ := s.storageClassLister().List(labels.Everything())
+	out := make([][]string, 0, len(items))
+	for _, sc := range items {
+		reclaim := "Delete"
+		if sc.ReclaimPolicy != nil {
+			reclaim = string(*sc.ReclaimPolicy)
+		}
+		binding := "Immediate"
+		if sc.VolumeBindingMode != nil {
+			binding = string(*sc.VolumeBindingMode)
+		}
+		name := sc.Name
+		if sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" {
+			name += " (default)"
+		}
+		out = append(out, []string{name, sc.Provisioner, reclaim, binding, age(sc.CreationTimestamp.Time)})
+	}
+	sortRows(out, 0)
+	return out
+}

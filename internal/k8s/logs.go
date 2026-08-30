@@ -39,7 +39,7 @@ func (s *Store) logTarget(kind, ns, name string) (pod, container string, err err
 		c, err := s.podContainer(ens, name)
 		return name, c, err
 
-	case kDeployments, kStatefulSet, kDaemonSets, kJobs:
+	case kDeployments, kStatefulSet, kDaemonSets, kJobs, kReplicaSets:
 		sel, err := s.workloadSelector(kind, ens, name)
 		if err != nil {
 			return "", "", err
@@ -91,6 +91,12 @@ func (s *Store) workloadSelector(kind, ns, name string) (labels.Selector, error)
 		m = d.Spec.Selector
 	case kJobs:
 		d, err := s.jobLister().Jobs(ns).Get(name)
+		if err != nil {
+			return nil, err
+		}
+		m = d.Spec.Selector
+	case kReplicaSets:
+		d, err := s.rsLister().ReplicaSets(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +168,10 @@ func (s *Store) LogsFollow(kind, ns, name string) (<-chan string, func(), error)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tail := int64(defaultLogTail)
+	// Tail 0: the caller has already loaded the history it wants via
+	// LogsTail, so replaying any here would show every one of those lines
+	// twice — the stream's job is only the lines that arrive from now on.
+	tail := int64(0)
 	req := s.c.Clientset.CoreV1().Pods(effectiveNS(ns)).
 		GetLogs(pod, &corev1.PodLogOptions{Container: container, Follow: true, TailLines: &tail, Timestamps: true})
 	stream, err := req.Stream(ctx)

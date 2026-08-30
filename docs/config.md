@@ -7,13 +7,14 @@ a real user's file).
 ## What's saved
 
 ```yaml
-# k10s configuration — edited in-app via /config, /settings, T, /ns, /context
+# k10s configuration — edited in-app via /settings, /theme, T, :ns, :ctx
 theme: "dracula"
 context: "prod-eks-apse1"
 namespace: "default"
 cli: "k"
 clis: "kubectl,k8s,k"
 onboarded: true
+collapsed: "Config,Storage,RBAC"
 ai:
   provider: "anthropic"
   base_url: "https://api.anthropic.com/v1"
@@ -35,6 +36,13 @@ nothing fancier (lists, multi-line, anchors) is needed or supported.
 File permissions are `0600` since the file can hold an API key; the parent
 directory `~/.k10s` is created with `0755` on first save.
 
+`collapsed` lists the Resources-pane groups folded away. It is written on
+every save, and **`"-"` means "none, deliberately"** — an empty value would
+be indistinguishable from a config written before the key existed, and k10s
+would fold the default groups (`Config`, `Storage`, `RBAC`) back over
+somebody who had just opened them. A file without the key at all still gets
+those defaults, which is what makes the first run after an upgrade sensible.
+
 ## When it saves
 
 Every mutation that should survive a restart calls `Model.saveConfig()`
@@ -43,13 +51,14 @@ immediately — there's no explicit "save" step and no dirty-flag debounce:
 | Trigger                                                     | Field(s) saved                                                               |
 |-------------------------------------------------------------|------------------------------------------------------------------------------|
 | `T` / `ctrl+t` / click theme label                          | `theme`                                                                      |
-| `/context [name]`                                           | `context`                                                                    |
-| `/ns <name>`                                                | `namespace`                                                                  |
+| `:ctx <name>` / the context picker                          | `context` (as the namespace's address — see below)                           |
+| `:ns <name>`                                                | `namespace`                                                                  |
 | `/settings` → toggle provider (←→/click/enter)              | `ai.provider`, `ai.base_url`, `ai.model` (reset to that provider's defaults) |
 | `/settings` → edit Base URL / Model / API Key, then `enter` | the edited field                                                             |
 | `/theme` picker → Save / `enter`                            | `theme`                                                                      |
-| `/settings` (or first-run onboarding) → Save                | `cli`, `onboarded`                                                           |
+| `/settings` → Save                                          | `cli`                                                                        |
 | namespace picker (click `ns …` in the banner)               | `namespace`                                                                  |
+| folding a Resources group (`space`, `left`, click a header) | `collapsed`                                                                  |
 | `/settings` → toggle the update check                       | `update.disabled`                                                            |
 | a successful update check (startup or `/update`)            | `update.last_check`                                                          |
 
@@ -59,23 +68,35 @@ toast — `config save failed: …` — and never blocks the UI.
 ## Load on startup
 
 `New()` calls `loadConfig()` once: matches `theme` against
-`theme.Themes[i].Name`, applies `namespace` and `cli` directly, and fills the
-AI config (provider/url/model/key) from whatever is present. A missing file
-is not an error — the built-in defaults (tokyo-night, the kubeconfig's own
-namespace, `kubectl`, Anthropic preset) apply.
+`theme.Themes[i].Name`, applies `cli` and (for the matching context) the
+`namespace` directly, and fills the AI config (provider/url/model/key) from
+whatever is present. A missing file is not an error — the built-in defaults
+(tokyo-night, the kubeconfig context's own namespace, `kubectl`, Anthropic
+preset) apply.
 
-`context` is handled differently: it names a kubeconfig context, and
-switching to it means rebuilding the whole client. Since the first
-connection is itself asynchronous, the saved context is applied when that
-connection lands — and only if it isn't the one already reached, which is
-the usual case. Either way it is an async switch, never a blocking startup.
+`context` is **not** a "connect here" pin. k10s always opens on
+**kubeconfig's current-context** — the cluster the `kubectl` in the next
+terminal is talking to. A TUI that quietly opened a different cluster than
+the shell beside it is a good way to run the right command in the wrong
+place, and switching context inside k10s does not write to kubeconfig, so
+the two would drift apart with nothing on screen saying so.
 
-A namespace read from config is also remembered as pinned, so the first
-connection doesn't overwrite it with the context's own default namespace.
+What the key records is **which context the saved namespace belongs to**.
+On startup the namespace is restored only when `context` matches the
+context being opened; on any other cluster that namespace might not even
+exist, so the context's own default namespace wins and nothing is pinned.
+While a context switch is in flight the pair is written against the context
+being switched *to*, so quitting mid-switch doesn't leave the two halves
+pointing at different clusters.
 
-`onboarded` is what suppresses the first-run CLI picker. It is tracked
-separately from `cli` so that choosing the default value still counts as
-having answered.
+To open a different cluster, change kubeconfig (`kubectl config
+use-context …`) — or switch inside k10s with `:ctx <name>` for the session.
+
+`onboarded` records that k10s has been run before. There is no first-run
+dialog any more — every setting has a working default, so a form in front of
+the cluster was only something to dismiss — and all this flag decides is
+whether the status bar mentions `/settings` once on the very first launch.
+It is written as soon as that launch happens.
 
 The `update:` block is read the same way, and the field is deliberately
 spelled `disabled` rather than `enabled`: absent means the check runs, so a

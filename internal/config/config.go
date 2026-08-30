@@ -43,17 +43,25 @@ type Config struct {
 	// the prompt. All three presets are enabled by default, because people
 	// alias them interchangeably.
 	CLIs []string `yaml:"clis"`
-	// Onboarded records that the first-run setup has been completed, so it
-	// isn't shown again even if every other value is left at its default.
-	Onboarded bool   `yaml:"onboarded"`
-	AI        AI     `yaml:"ai"`
-	Update    Update `yaml:"update"`
+	// Onboarded records that k10s has been run before. There is no longer a
+	// first-run dialog, so all this decides is whether the status bar points
+	// at /settings once on the very first launch.
+	Onboarded bool `yaml:"onboarded"`
+	// Collapsed lists the sidebar groups the user has folded away, and
+	// CollapsedSet says the file carried that key at all. Without the second
+	// flag, "the user opened every group" and "this config predates the
+	// feature" both look like an empty list, and k10s would keep re-folding
+	// groups somebody deliberately opened.
+	Collapsed    []string `yaml:"collapsed"`
+	CollapsedSet bool     `yaml:"-"`
+	AI           AI       `yaml:"ai"`
+	Update       Update   `yaml:"update"`
 }
 
-// DefaultCLI is used until the user picks one during onboarding.
+// DefaultCLI is the name used until /settings says otherwise.
 const DefaultCLI = "kubectl"
 
-// CLIPresets are the choices offered by onboarding and the settings modal.
+// CLIPresets are the names k10s recognises out of the box.
 var CLIPresets = []string{"kubectl", "k8s", "k"}
 
 // Path returns the config file location: $K10S_CONFIG if set,
@@ -105,13 +113,20 @@ func Save(c Config) error {
 
 func render(c Config) string {
 	var b strings.Builder
-	b.WriteString("# k10s configuration — edited in-app via /config, T, /ns, /context\n")
+	b.WriteString("# k10s configuration — edited in-app via /settings, /theme, T, :ns, :ctx\n")
 	fmt.Fprintf(&b, "theme: %q\n", c.Theme)
 	fmt.Fprintf(&b, "context: %q\n", c.Context)
 	fmt.Fprintf(&b, "namespace: %q\n", c.Namespace)
 	fmt.Fprintf(&b, "cli: %q\n", c.CLI)
 	fmt.Fprintf(&b, "clis: %q\n", strings.Join(c.CLIs, ","))
 	fmt.Fprintf(&b, "onboarded: %v\n", c.Onboarded)
+	// "-" is how "none, deliberately" is written: an empty value would be
+	// indistinguishable from a config written before this key existed.
+	collapsed := strings.Join(c.Collapsed, ",")
+	if collapsed == "" {
+		collapsed = "-"
+	}
+	fmt.Fprintf(&b, "collapsed: %q\n", collapsed)
 	b.WriteString("ai:\n")
 	fmt.Fprintf(&b, "  provider: %q\n", c.AI.Provider)
 	fmt.Fprintf(&b, "  base_url: %q\n", c.AI.BaseURL)
@@ -164,6 +179,16 @@ func parse(s string, c *Config) {
 			}
 		case !indented && key == "onboarded":
 			c.Onboarded = val == "true"
+		case !indented && key == "collapsed":
+			c.CollapsedSet = true
+			c.Collapsed = nil
+			if val != "-" {
+				for _, p := range strings.Split(val, ",") {
+					if p = strings.TrimSpace(p); p != "" {
+						c.Collapsed = append(c.Collapsed, p)
+					}
+				}
+			}
 		case indented && section == "ai":
 			switch key {
 			case "provider":

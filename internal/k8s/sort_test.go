@@ -48,7 +48,7 @@ func TestRowsAreSortedAlphabetically(t *testing.T) {
 	}
 }
 
-// TestAllNamespacesGroupsByNamespace pins the /ns all ordering: namespace
+// TestAllNamespacesGroupsByNamespace pins the :ns all ordering: namespace
 // first, then name, so objects from one namespace stay together.
 func TestAllNamespacesGroupsByNamespace(t *testing.T) {
 	s := newTestStore(t,
