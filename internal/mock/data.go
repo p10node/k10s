@@ -50,10 +50,15 @@ var clusterNodes = []node{
 const clusterVersion = "v1.31.4"
 
 // contexts available for :ctx switching.
+// Every demo context is named for what it is. They used to read
+// "prod-eu-west-1" / "gke-prod-asia", which look exactly like somebody's
+// real clusters — in a screenshot, in a bug report, or in the header of a
+// k10s that quietly fell back to the demo. domain.IsDemoContext keys off
+// this prefix, so a name outside it would also stop routing here.
 var contexts = []string{
-	"prod-eu-west-1",
-	"eks-staging-apse1",
-	"gke-prod-asia",
+	domain.DemoContext,
+	domain.DemoContext + "-staging",
+	domain.DemoContext + "-prod",
 }
 
 var resources = []resourceDef{

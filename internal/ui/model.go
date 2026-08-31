@@ -222,6 +222,24 @@ type Model struct {
 	connGen    int
 	connName   string
 
+	// startTarget is the context the first connection asks for: "" (let
+	// kubeconfig choose) for a normal launch, the demo context for
+	// `k10s demo`.
+	startTarget string
+
+	// kubeCtxs is kubeconfig's own context list, read once at startup. The
+	// live backend serves the same list, but the demo backend serves its
+	// own, so this is what keeps the real contexts reachable from inside
+	// the demo — see ctxChoices.
+	kubeCtxs []string
+
+	// offline is the settled version of the same story: the attempt is over
+	// and there is no cluster. The main panel says so and shows no rows —
+	// k10s does not stand in for a cluster it could not reach. offlineWhy is
+	// the backend's own reason, shown verbatim. See nocluster.go.
+	offline    bool
+	offlineWhy string
+
 	portFwds map[string]func()
 	logStop  func()
 	logCh    <-chan string
@@ -765,8 +783,11 @@ func (m *Model) Init() tea.Cmd {
 		// The cluster is reached off the event loop, so the first frame —
 		// spinner and all — is on screen before anything can block. The
 		// empty name means kubeconfig's current-context, which is the only
-		// cluster k10s ever opens on.
-		cmds = append(cmds, m.connectCmd(""))
+		// cluster k10s ever opens on. startTarget is non-empty only when the
+		// caller asked for a context that is not kubeconfig's to give —
+		// `k10s demo`, which has to be requested by name or Connect would
+		// never know to serve the demo.
+		cmds = append(cmds, m.connectCmd(m.startTarget))
 	}
 	// Nil unless the check is on and a day has passed, so most launches make
 	// no network call at all.
@@ -1122,6 +1143,13 @@ func (m *Model) switchContextCmd(name string) tea.Cmd {
 	if _, pending := m.src.(*pendingSource); pending {
 		return m.connectCmd(name)
 	}
+	// Entering or leaving the demo means a different backend entirely, and
+	// only Connect can build one. Asking the current backend to switch would
+	// have the demo hand back a demo cluster wearing a real context's name,
+	// which is the exact confusion the demo is not allowed to cause.
+	if m.connect != nil && domain.IsDemoContext(name) != m.demoMode() {
+		return m.connectCmd(name)
+	}
 	m.toast = "… switching context"
 	m.startBusy("connecting to " + name)
 	src := m.src
@@ -1373,6 +1401,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.resetRowSelection()
 		}
 		return nil
+	}
+
+	// With no cluster there is no table to search or act on, so the No
+	// cluster panel's own two keys take precedence over the action hotkeys
+	// they collide with ("r" is Rollout Restart, which has nothing to
+	// restart here).
+	if m.offline && m.mode == modeTable {
+		if cmd, handled := m.offlineKey(key); handled {
+			return cmd
+		}
 	}
 
 	// `/` while browsing a table searches its rows (like less/vim); anywhere
@@ -2172,6 +2210,9 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 		m.openSettings()
 		m.closePrompt()
 		return nil
+	case "/mouse":
+		m.closePrompt()
+		return m.toggleMouse()
 	case "/update":
 		m.closePrompt()
 		return m.startUpdate(arg)
@@ -2179,9 +2220,6 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 		m.showText("version", versionReport(m))
 		m.closePrompt()
 		return nil
-	case ":mouse":
-		m.closePrompt()
-		return m.toggleMouse()
 	case ":ctx", ":context", ":contexts":
 		m.closePrompt()
 		if arg == "" {
@@ -2231,6 +2269,15 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 			m.toast = "row filter: " + arg
 		}
 		return nil
+	case "/demo":
+		m.closePrompt()
+		if m.demoMode() {
+			m.toast = "already in the demo — :ctx picks a real context to leave it"
+			return nil
+		}
+		return m.switchContextCmd(domain.DemoContext)
+	case "/setup":
+		m.showText("setup", SetupGuide())
 	case "/help":
 		m.showText("help", Help())
 	default:

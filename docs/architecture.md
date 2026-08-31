@@ -8,6 +8,8 @@ cmd/shot/               headless renderer for dev (replays keys, prints one fram
 internal/domain/        the Source interface + shared types — the whole contract
 internal/k8s/           live backend: client-go informers, describe/YAML/logs/exec/pf
 internal/mock/          offline demo backend, same interface, no network
+                        (reached by name: the k10s-demo context, cmd/shot,
+                        and the tests — never as a fallback)
 internal/ai/            OpenAI-compatible / Anthropic HTTP calls
 internal/theme/         Theme struct + 7 palettes
 internal/config/        ~/.k10s/config.yaml load/save
@@ -22,6 +24,7 @@ internal/ui/
   shellcmd.go           plain text at the prompt → a shell command
   msgs.go               async result messages
   connect.go            startup: pendingSource + the background connect
+  nocluster.go          the "No cluster" state: panel, retry, /setup guide
   update.go             /update + /version: the check, the confirm, the install
   pickers.go/_view.go   theme picker
   palette.go/_view.go   global search palette, namespace picker

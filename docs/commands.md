@@ -34,7 +34,7 @@ Cmd+K cannot be bound to this — see [keybindings.md](keybindings.md#search).
   about the cluster you are looking at.
 - **`:` — the cluster, in the k9s vocabulary.** Name a resource to open its
   view (`:po`, `:deploy`), switch where you are (`:ns`, `:ctx`), or act on
-  the view you are on (`:search`, `:filter`, `:scale`, `:mouse`).
+  the view you are on (`:search`, `:filter`, `:scale`).
 
 Typing either prefix pre-fills it and shows only that set. `↑↓` (or the
 wheel) moves the highlight and **`enter` runs the highlighted command straight away** — no
@@ -47,13 +47,15 @@ enter runs it. `tab` always completes rather than runs.
 |-------------|----------|--------------------------------------------------------------|
 | `/theme`    |          | theme picker with live preview                               |
 | `/settings` |          | CLI name, AI provider **and** the update check, in one dialog |
+| `/mouse`    |          | toggle mouse capture — same as `ctrl+s`                      |
 | `/update`   | `[skip]` | check GitHub for a newer k10s and install it over this binary |
 | `/version`  |          | which build is running, and what the last check found        |
+| `/demo`     |          | switch to k10s's built-in demo cluster (`k10s-demo`) — sample data; `:ctx` leaves it |
+| `/setup`    |          | how to install kubectl and get a `~/.kube/config` — links, readable with no cluster connected |
 | `/help`     |          | keybindings + commands text view                             |
 | `:search`   | `<term>` | filter the resource list (left pane, by kind)                |
 | `:filter`   | `<term>` | filter rows of the table currently open (main pane)          |
 | `:scale`    | `<n>`    | scale the selected deployment/statefulset/replicaset         |
-| `:mouse`    |          | toggle mouse capture — same as `ctrl+s`                      |
 | `:ns`       | `[name]` | the Namespaces table; with a name, switch straight to it     |
 | `:ctx`      | `[name]` | context picker; with a name, switch straight to it           |
 | `:aliases`  |          | every `:` name in one text view                              |

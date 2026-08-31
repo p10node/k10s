@@ -1,5 +1,9 @@
 // Command shot renders the TUI headlessly so layouts can be inspected without
 // an interactive terminal. Usage: shot <w> <h> <comma-separated key tokens>
+//
+// K10S_SHOT_NOCLUSTER=1 renders the "No cluster" state instead of the demo
+// backend — the one screen the demo data cannot show, and the one every
+// user with no kubeconfig sees first.
 package main
 
 import (
@@ -14,6 +18,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/muesli/termenv"
 
+	"github.com/p10node/k10s/internal/domain"
 	"github.com/p10node/k10s/internal/mock"
 	"github.com/p10node/k10s/internal/ui"
 )
@@ -52,7 +57,26 @@ func main() {
 	defer zone.Close()
 
 	var m tea.Model = ui.New(mock.New(""))
+	// The no-cluster screen has no demo data behind it by definition, so it
+	// is built the way main.go builds the real thing: a startup model whose
+	// Connect fails. Init's connect command is run through drain, which
+	// lands the model in the settled state rather than the spinner.
+	var startup *ui.Model
+	if os.Getenv("K10S_SHOT_NOCLUSTER") != "" {
+		startup = ui.NewStartup(ui.Startup{
+			Kinds:    mock.New("").Kinds(),
+			Contexts: []string{"kind-kind", "minikube"},
+			Context:  "kind-kind",
+			Connect: func(string) (domain.Source, string) {
+				return nil, `Get "https://127.0.0.1:6443/version": dial tcp 127.0.0.1:6443: connect: connection refused`
+			},
+		})
+		m = startup
+	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	if startup != nil {
+		m = drain(m, startup.Init())
+	}
 
 	for _, tok := range strings.Split(seq, ",") {
 		tok = strings.TrimSpace(tok)

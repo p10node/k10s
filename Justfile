@@ -41,6 +41,14 @@ run: build
 dev:
     go run .
 
+# Opens on the k10s-demo context. Plain `k10s` shows "No cluster" rather than
+# sample data, so this is how you see the UI with nothing connected. `:ctx`
+# leaves the demo. (`just demo` records the GIF instead.)
+
+# Run from source against the built-in demo cluster — no kubeconfig needed.
+dev-demo:
+    go run . demo
+
 # Render one frame headlessly (no TTY/cluster); replay keys: `just shot 140 44 j,j,d`
 shot w="140" h="44" keys="":
     go run ./cmd/shot {{w}} {{h}} "{{keys}}"
@@ -171,7 +179,9 @@ demo: install
 
 # Capture the README hero: a real terminal frame of the running TUI.
 screenshot: build
-    rm -f /tmp/k10s-screenshot-config.yaml
+    # A throwaway config with the update check off: the hero frame should
+    # show k10s, not a release notice that happens to be pending today.
+    printf 'onboarded: true\nupdate:\n  disabled: true\n' > /tmp/k10s-screenshot-config.yaml
     vhs assets/screenshot.tape
     magick assets/screenshot.png -colors 256 PNG8:assets/screenshot.png
     @ls -lh assets/screenshot.png

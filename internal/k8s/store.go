@@ -337,6 +337,11 @@ func (s *Store) nodeMetric(name string) (metricSample, bool) {
 
 func (s *Store) Kinds() []domain.Kind { return Kinds() }
 
+// Ping reports whether there is a cluster behind this store — see
+// Client.Reachable. Nothing here dials: the answer was settled by the single
+// version request New already made, so this is free to call.
+func (s *Store) Ping() error { return s.c.Reachable() }
+
 func (s *Store) ClusterInfo() domain.ClusterInfo {
 	info := domain.ClusterInfo{
 		Context: s.c.CurrentContext, Kubeconfig: s.c.ConfigPath,

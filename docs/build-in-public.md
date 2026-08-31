@@ -148,7 +148,8 @@ the cursor moving to a row and clicking it *is* the pitch. Storyboard:
 | 26–30s | back to the hero frame, hold still on it |
 
 Rules: 100×28 or larger, font size ~16 so it is legible in a Reddit preview,
-**always the offline demo backend**, under 10MB or GitHub will not inline it,
+**always the offline demo backend** (`k10s demo` — it is opt-in now, plain
+`k10s` shows "No cluster"), under 10MB or GitHub will not inline it,
 no cut that requires the viewer to read a status bar to follow along.
 
 ### The reproducible clip — vhs, for docs and release notes
@@ -164,7 +165,7 @@ Set Width 1200
 Set Height 700
 Set Padding 20
 
-Type "k10s"    Enter    Sleep 3s
+Type "k10s demo"    Enter    Sleep 3s
 Escape         Sleep 1s          # dismiss first-run onboarding
 Down Down Down Sleep 1s          # to the CrashLoopBackOff pod
 Type "l"       Sleep 3s          # logs, following
@@ -205,8 +206,9 @@ The work already produces the material; the trick is not losing it.
 ## What never goes public
 
 - Real cluster names, namespaces, hostnames or customer identifiers in any
-  frame. **Use the mock backend for every published screenshot** — that is
-  what it exists for. (Check `internal/mock/data.go` first: demo data that
+  frame. **Run `k10s demo` for every published screenshot** — the mock
+  backend is what it exists for, and since it is opt-in you now have to ask
+  for it explicitly. (Check `internal/mock/data.go` first: demo data that
   *looks* internal is the same problem as data that is.)
 - Colleagues' names, employers or Slack messages without asking them first.
   Thanking a team is warm; identifying individuals is theirs to consent to.

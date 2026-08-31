@@ -84,8 +84,18 @@ undo by accident.
 
 ## Possible next steps
 
-- More kinds (ReplicaSets, HPAs, NetworkPolicies, RBAC).
-- Column sorting by clicking a header.
-- Multi-select for bulk delete.
-- Log filtering / grep within the follow stream.
-- Saved views (kind + namespace + filter) as named shortcuts.
+The backlog now lives in [plan.md](plan.md) as task cards — each one carries
+its own goal, files, design notes and acceptance criteria, so it can be picked
+up (by a person or an agent) without further context. Twenty-six cards across
+four phases:
+
+- **P0 — trust & correctness.** A kind-cluster e2e suite, a container picker
+  (logs currently always read `Containers[0]`, which is the wrong container on
+  any pod with a sidecar), per-object events, CLI flags, and a read-only mode.
+- **P1 — daily driver.** Column sort, multi-select bulk actions, log
+  grep/`--previous`, a port-forward manager, secret decode, saved views.
+- **P2 — differentiators.** An owner tree, an AI that actually reads describe
+  and events (with redaction before anything leaves the machine), a pulse
+  dashboard, `can-i`, diff-before-apply, Helm.
+- **P3 — security, polish, distribution.** Signature verification, keychain,
+  custom keybindings and columns, export, packaging.

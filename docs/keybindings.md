@@ -15,7 +15,7 @@
 | `ctrl+p`               | **search everything** — kinds and objects in one box                                                                          |
 | `ctrl+s`               | toggle mouse capture (copy-mode)                                                                                              |
 | `/`                    | commands — namespace, context, theme, settings                                                                                |
-| `:`                    | narrowing — search, filter, mouse capture                                                                                     |
+| `:`                    | narrowing — search, filter, scale                                                                                             |
 | `f`                    | find: focus the main table's row-search box                                                                                   |
 | `ctrl+a`               | toggle AI prompt mode (also focuses prompt)                                                                                   |
 
@@ -31,7 +31,7 @@
 ## Copy & select
 
 k10s captures the mouse, which stops the terminal doing its own click-drag
-selection. `ctrl+s` (or `:mouse`) releases it: drag-select and copy as usual,
+selection. `ctrl+s` (or `/mouse`) releases it: drag-select and copy as usual,
 and the status dot changes to `✂` while capture is off. Press it again to get
 clicking back.
 
@@ -121,6 +121,24 @@ nothing greyed out.
 Confirm modals: `enter`/`y` confirm · `esc`/`n` cancel.
 
 A kind with no logs falls back to **describe** instead of erroring.
+
+## No cluster
+
+With nothing connected the main panel is the **No cluster** panel and the
+action keys above have nothing to act on, so two of them are rebound while it
+is on screen:
+
+| Key       | Action                                                    |
+|-----------|-----------------------------------------------------------|
+| `r`       | retry the connection (instead of Rollout Restart)         |
+| `enter`   | same — retry                                              |
+| `:ctx`    | pick another kubeconfig context                           |
+| `/setup`  | installing kubectl, getting a `~/.kube/config` — links     |
+| `/demo`   | try the UI on k10s's sample cluster (labelled `DEMO`)      |
+
+Everything else still works: the sidebar, the prompt, `/help`, the theme
+picker. See [cluster-setup.md](cluster-setup.md) and
+[ui.md](ui.md#no-cluster).
 
 Applicable command plugins from `~/.k10s/plugins.yaml` are listed after the
 built-in actions. Their configured shortcut or a click runs them. Built-in

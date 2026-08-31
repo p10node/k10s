@@ -17,6 +17,26 @@ import (
 // AllNamespaces is the :ns sentinel that shows every namespace at once.
 const AllNamespaces = "all"
 
+// DemoContext is the context name that selects k10s's built-in demo backend
+// (internal/mock) instead of a cluster. It is a context, not a mode, so it
+// travels the one path everything else already uses: `:ctx`, `/demo` and
+// `k10s demo` all just ask to connect to this name, and leaving the demo is
+// picking any other context.
+//
+// It lives here because it is the one string the UI and main.go must agree
+// on, and neither may import the other's backend. The UI never constructs a
+// demo backend; it only ever names this context.
+const DemoContext = "k10s-demo"
+
+// IsDemoContext reports whether name addresses the demo backend. The demo
+// serves several contexts of its own so that switching between them is
+// demonstrable, and they all carry the prefix — a context that says "demo"
+// wherever it is displayed, which is the point: no frame of the demo should
+// read like somebody's real cluster.
+func IsDemoContext(name string) bool {
+	return name == DemoContext || strings.HasPrefix(name, DemoContext+"-")
+}
+
 // ShellSession is a live exec stream: write keystrokes to it, read the
 // program's output off Output, and tell it when the panel resizes.
 type ShellSession interface {

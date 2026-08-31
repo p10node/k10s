@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
@@ -35,6 +36,12 @@ type Client struct {
 	CurrentContext string
 	Server         string
 	Version        string
+
+	// versionErr is what the API server said — or failed to say — when New
+	// asked it for its version. It is the one request New makes, so it is
+	// also the only evidence we have that there is a cluster at the other
+	// end at all. See Reachable.
+	versionErr error
 }
 
 // KubeconfigPath resolves the path k10s should load, honoring $KUBECONFIG
@@ -121,12 +128,34 @@ func New(path, context string) (*Client, error) {
 		CurrentContext: cur,
 		Server:         restCfg.Host,
 	}
-	v, err := disco.ServerVersion()
-	if err != nil {
-		return nil, fmt.Errorf("server version: %w", err)
+	if v, err := disco.ServerVersion(); err == nil {
+		c.Version = v.GitVersion
+	} else {
+		c.versionErr = err
 	}
-	c.Version = v.GitVersion
 	return c, nil
+}
+
+// Reachable reports whether there is actually a cluster behind this
+// kubeconfig context: nil if the API server answered, the failure otherwise.
+//
+// A kubeconfig that parses is not a cluster. Every client above is built
+// lazily and none of them dials, so a context left over from a cluster that
+// was deleted — or one whose VPN is down — builds a perfectly healthy Client
+// that can never answer. Without this check k10s would sit on an empty
+// table instead of saying so.
+//
+// 401/403 are deliberately *not* unreachable: that is a live cluster
+// refusing this user, a different problem with a different fix, and k10s can
+// still show whatever they are allowed to see.
+func (c *Client) Reachable() error {
+	if c.versionErr == nil {
+		return nil
+	}
+	if apierrors.IsUnauthorized(c.versionErr) || apierrors.IsForbidden(c.versionErr) {
+		return nil
+	}
+	return c.versionErr
 }
 
 // Contexts lists every context name in the loaded kubeconfig, sorted.

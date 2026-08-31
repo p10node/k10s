@@ -9,6 +9,7 @@ just build            # → ./k10s, version stamped from git describe
 just build-release    # → ./k10s, stripped (~a third smaller)
 just run              # build + run — needs a TTY
 just dev              # go run . without producing a binary
+just dev-demo         # go run . demo — the k10s-demo context, no kubeconfig
 just version          # print the version this tree would stamp
 ```
 
@@ -17,8 +18,10 @@ bare `go build` do not, so those report `dev`. That is deliberate — `dev`
 compares older than every release, so a source build can still exercise
 `/update`. See [update.md](update.md).
 
-Go 1.26+. k10s uses your current kubeconfig context, and falls back to the
-offline demo backend when no cluster is reachable, so it always starts.
+Go 1.26+. k10s uses your current kubeconfig context. With no cluster
+reachable it starts anyway and shows its "No cluster" panel — the offline
+demo backend is opt-in (`k10s demo`), never a silent fallback. See
+[cluster-setup.md](cluster-setup.md).
 
 ## Tests
 
@@ -73,7 +76,14 @@ just shot 140 44 "left,sec"          # focus list, type "sec"
 just shot 140 44 ":,/config,enter"   # AI settings modal
 just shot 140 44 "ctrl+p,web"        # search palette
 go run ./cmd/shot 120 40 "esc,f,web" # or call it directly
+
+K10S_SHOT_NOCLUSTER=1 just shot      # the "No cluster" panel instead
 ```
+
+`K10S_SHOT_NOCLUSTER=1` is the one frame the demo backend cannot produce: it
+builds the same startup model `main.go` does, with a `Connect` that fails, so
+the panel every user without a kubeconfig sees first is reviewable headlessly
+too. See [cluster-setup.md](cluster-setup.md).
 
 Key tokens are comma-separated. Multi-char tokens are sent as one rune batch
 (handy for typing into search/prompt). Special names: `tab enter esc up down

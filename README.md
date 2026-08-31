@@ -31,7 +31,7 @@ already knows your cluster, namespace and selected object.**
 
 <img src="assets/screenshot.png" alt="k10s running in a terminal: resource sidebar, pod table with live status, and an action pane for the selected pod" width="960">
 
-<sub>A real terminal capture of `k10s` running - `just screenshot`, on the offline demo backend. Every frame in these docs comes out of the running binary, never hand-drawn.</sub>
+<sub>A real terminal capture of `k10s demo` running - `just screenshot`, on the offline demo backend. Every frame in these docs comes out of the running binary, never hand-drawn.</sub>
 
 </div>
 
@@ -63,18 +63,29 @@ and **how little you have to remember**.
 
 ## Try it in 30 seconds (no cluster required)
 
-k10s ships an offline demo backend. No kubeconfig, no cluster, no risk - you
-get a realistic cluster to click around in, including a CrashLoopBackOff to
-poke at.
+k10s ships an offline demo backend: a realistic cluster to click around in,
+including a CrashLoopBackOff to poke at. It is **opt-in**, because sample
+data should never be mistaken for your machine.
 
 ```bash
 git clone https://github.com/p10node/k10s && cd k10s
-go run .          # no cluster reachable → offline demo mode
+go run . demo     # the sample cluster - fake data, clearly labelled
+go run .          # your real cluster, or "No cluster" if there isn't one
 ```
 
-The same binary connects to your real cluster the moment one is reachable.
-There is no flag to remember: `main.go` builds the live client-go backend and
-falls back to the demo only if that fails.
+The demo is a **context**, not a mode. `k10s demo` opens on it, `/demo`
+switches to it from anywhere, and `:ctx` always lists it (labelled
+`k10s demo · sample data`, with a legend under the list). **To leave it,
+pick any other context** - there is no separate exit. While it is up the
+header carries a `DEMO` marker, so no frame of it can be mistaken for a real
+cluster.
+
+Plain `k10s` reads the same kubeconfig `kubectl` does (`$KUBECONFIG`, else
+`~/.kube/config`) and shows what that context can reach - and nothing else.
+With no kubeconfig, or a context whose API server does not answer, the main
+panel says **No cluster** and points at the way in: `r` retries, `:ctx` picks
+another context, `/setup` has the kubectl and kubeconfig links.
+[docs/cluster-setup.md](docs/cluster-setup.md) is the same guide, longer.
 
 ## Install
 
@@ -116,6 +127,7 @@ Then run it:
 
 ```bash
 k10s                  # your current kubeconfig context
+k10s demo             # the built-in sample cluster, no cluster needed
 k10s --version        # which build is this
 ```
 
@@ -268,7 +280,7 @@ screen. `enter` runs the highlighted suggestion immediately - no second trip
 through the prompt.
 
 ```
-/theme   /settings   /update   /version   /help        k10s itself
+/theme  /settings  /mouse  /update  /version  /demo  /setup  /help    k10s itself
 
 :po  :deploy  :rs  :sts  :ds  :job  :cj  :hpa      workloads
 :svc  :ep  :ing  :netpol                           network
@@ -285,7 +297,7 @@ and `:aliases` prints the lot
 :svc api                        an argument that is not a namespace filters
 :ns   :ctx                      namespace / context picker
 :ns <name>   :ctx <name>        switch either outright
-:aliases  :search <term>  :filter <term>  :scale <n>  :mouse  :q
+:aliases  :search <term>  :filter <term>  :scale <n>  :q
 ```
 
 **`/` is k10s, `:` is the cluster** - namespace and context are `:ns` and
@@ -323,6 +335,7 @@ See [config.md](docs/config.md).
 | [commands.md](docs/commands.md)                                                   | prompt modes, slash commands, AI settings                     |
 | [themes.md](docs/themes.md)                                                       | theme list, picker, palette contract                          |
 | [config.md](docs/config.md) · [update.md](docs/update.md)                         | what persists · how self-update works                         |
+| [cluster-setup.md](docs/cluster-setup.md)                                         | no cluster? installing kubectl and getting a `~/.kube/config` |
 | [backends.md](docs/backends.md) · [dev.md](docs/dev.md)                           | live vs demo backend · build, tests, headless renderer        |
 | [roadmap.md](docs/roadmap.md)                                                     | what is done, what is missing, and the known limits           |
 | [marketing.md](docs/marketing.md) · [build-in-public.md](docs/build-in-public.md) | how this project is being shared                              |
