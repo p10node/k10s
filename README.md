@@ -185,15 +185,16 @@ close. No cluster data leaves your machine unless you press enter in AI
 mode. The only other network call k10s makes on its own is the once-a-day
 update check, which asks GitHub for a version number and nothing else.
 
-### Seven themes, previewed live before you commit
+### Seven built-in themes, plus your own — previewed live
 
 `tokyo-night` (default) · `catppuccin-mocha` · `dracula` · `nord` ·
 `gruvbox-dark` · `solarized-light` · `matrix`
 
 `T` cycles, `/theme` opens a picker that **applies each theme as you move
 through the list** - you judge it on the real UI, not on a name - and `esc`
-puts back whatever you had. No hardcoded color exists anywhere in the render
-path, so [adding a theme is one struct](docs/themes.md).
+puts back whatever you had. Drop a YAML palette into `~/.k10s/themes`, restart,
+and it appears in the same picker — no rebuild needed. See the
+[custom-theme guide and installable demo](docs/themes.md).
 
 ### Details that only show up after a long day
 

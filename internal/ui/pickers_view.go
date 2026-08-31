@@ -34,8 +34,23 @@ func (m *Model) overlayThemePicker(root Block) Block {
 	}
 	inner := w - 2
 
+	// Custom themes make the list unbounded. Keep the selected row in a
+	// viewport and reserve fixed room for the separator and Save button, so
+	// the popup never grows beyond the terminal.
+	visible := maxi(1, m.h-10)
+	if visible > len(m.themes) {
+		visible = len(m.themes)
+	}
+	start := clamp(m.themeRow-visible/2, 0, len(m.themes)-visible)
+	end := start + visible
+	title := "Theme · live preview"
+	if visible < len(m.themes) {
+		title += fmt.Sprintf(" · %d–%d/%d", start+1, end, len(m.themes))
+	}
+
 	body := []string{""}
-	for i, t := range theme.Themes {
+	for i := start; i < end; i++ {
+		t := m.themes[i]
 		selected := i == m.themeRow && !m.themeSave
 		bg := th.Bg
 		nameCol := th.Fg
@@ -77,6 +92,6 @@ func (m *Model) overlayThemePicker(root Block) Block {
 	body = append(body, s(th.Subtle).Render(hint)+s(th.Bg).Render(spaces(gap))+btn+s(th.Bg).Render(" "))
 
 	h := len(body) + 2
-	box := Panel(th, PanelOpts{Title: "Theme · live preview", Focused: true, W: w, H: h}, body)
+	box := Panel(th, PanelOpts{Title: title, Focused: true, W: w, H: h}, body)
 	return root.Overlay(box, (m.w-w)/2, maxi(0, (m.h-h)/2))
 }

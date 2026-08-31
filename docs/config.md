@@ -4,6 +4,11 @@
 `K10S_CONFIG=/path/to/file`, used by `cmd/shot` in tests so it never touches
 a real user's file).
 
+Custom themes live in the adjacent `themes/` folder (normally
+`~/.k10s/themes`) and can be moved independently with `K10S_THEME_DIR`. Theme
+files are documented in [themes.md](themes.md); only the selected theme name
+is stored in `config.yaml`.
+
 ## What's saved
 
 ```yaml
@@ -68,7 +73,7 @@ toast — `config save failed: …` — and never blocks the UI.
 ## Load on startup
 
 `New()` calls `loadConfig()` once: matches `theme` against
-`theme.Themes[i].Name`, applies `cli` and (for the matching context) the
+the combined built-in and custom theme names, applies `cli` and (for the matching context) the
 `namespace` directly, and fills the AI config (provider/url/model/key) from
 whatever is present. A missing file is not an error — the built-in defaults
 (tokyo-night, the kubeconfig context's own namespace, `kubectl`, Anthropic

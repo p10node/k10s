@@ -1,0 +1,15 @@
+# Rose Pine — demo custom theme for k10s.
+# Install: mkdir -p ~/.k10s/themes && cp examples/themes/rose-pine.yaml ~/.k10s/themes/
+name: rose-pine
+bg: "#191724"
+fg: "#e0def4"
+subtle: "#6e6a86"
+border: "#403d52"
+border_on: "#c4a7e7"
+accent: "#c4a7e7"
+accent2: "#ebbcba"
+ok: "#9ccfd8"
+warn: "#f6c177"
+err: "#eb6f92"
+sel_bg: "#26233a"
+sel_fg: "#e0def4"

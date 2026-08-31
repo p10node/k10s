@@ -1,6 +1,17 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/p10node/k10s/internal/config"
+	"sigs.k8s.io/yaml"
+)
 
 type Theme struct {
 	Name     string
@@ -19,6 +30,122 @@ type Theme struct {
 }
 
 func c(s string) lipgloss.Color { return lipgloss.Color(s) }
+
+var (
+	validThemeName  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	validThemeColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+)
+
+// Dir returns the custom-theme directory. K10S_THEME_DIR overrides the
+// default themes/ directory beside config.yaml.
+func Dir() string {
+	if dir := os.Getenv("K10S_THEME_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Join(filepath.Dir(config.Path()), "themes")
+}
+
+// Load returns the built-in themes followed by custom themes from Dir.
+func Load() ([]Theme, error) {
+	themes := append([]Theme(nil), Themes...)
+	custom, err := LoadDir(Dir())
+	if err != nil && os.IsNotExist(err) {
+		return themes, nil
+	}
+	seen := make(map[string]bool, len(themes)+len(custom))
+	for _, t := range themes {
+		seen[t.Name] = true
+	}
+	var duplicateErrs []error
+	for _, t := range custom {
+		if seen[t.Name] {
+			duplicateErrs = append(duplicateErrs, fmt.Errorf("duplicate theme name %q", t.Name))
+			continue
+		}
+		seen[t.Name] = true
+		themes = append(themes, t)
+	}
+	return themes, errors.Join(append([]error{err}, duplicateErrs...)...)
+}
+
+type themeFile struct {
+	Name     string `json:"name"`
+	Bg       string `json:"bg"`
+	Fg       string `json:"fg"`
+	Subtle   string `json:"subtle"`
+	Border   string `json:"border"`
+	BorderOn string `json:"border_on"`
+	Accent   string `json:"accent"`
+	Accent2  string `json:"accent2"`
+	Ok       string `json:"ok"`
+	Warn     string `json:"warn"`
+	Err      string `json:"err"`
+	SelBg    string `json:"sel_bg"`
+	SelFg    string `json:"sel_fg"`
+}
+
+// LoadDir reads custom theme YAML files from dir in filename order.
+func LoadDir(dir string) ([]Theme, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		out  []Theme
+		errs []error
+	)
+	for _, entry := range entries {
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if entry.IsDir() || (ext != ".yaml" && ext != ".yml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
+			continue
+		}
+		var f themeFile
+		if err := yaml.UnmarshalStrict(data, &f); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
+			continue
+		}
+		if err := f.validate(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
+			continue
+		}
+		out = append(out, Theme{
+			Name: f.Name, Bg: c(f.Bg), Fg: c(f.Fg), Subtle: c(f.Subtle),
+			Border: c(f.Border), BorderOn: c(f.BorderOn), Accent: c(f.Accent), Accent2: c(f.Accent2),
+			Ok: c(f.Ok), Warn: c(f.Warn), Err: c(f.Err), SelBg: c(f.SelBg), SelFg: c(f.SelFg),
+		})
+	}
+	return out, errors.Join(errs...)
+}
+
+func (f themeFile) validate() error {
+	fields := map[string]string{
+		"name": f.Name, "bg": f.Bg, "fg": f.Fg, "subtle": f.Subtle,
+		"border": f.Border, "border_on": f.BorderOn, "accent": f.Accent,
+		"accent2": f.Accent2, "ok": f.Ok, "warn": f.Warn, "err": f.Err,
+		"sel_bg": f.SelBg, "sel_fg": f.SelFg,
+	}
+	for name, value := range fields {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("missing required field %q", name)
+		}
+	}
+	if !validThemeName.MatchString(f.Name) {
+		return fmt.Errorf("name %q must use lowercase letters, numbers, hyphens, or underscores", f.Name)
+	}
+	delete(fields, "name")
+	for name, value := range fields {
+		if !validThemeColor.MatchString(value) {
+			return fmt.Errorf("field %q must be a #RRGGBB color, got %q", name, value)
+		}
+	}
+	return nil
+}
 
 var Themes = []Theme{
 	{

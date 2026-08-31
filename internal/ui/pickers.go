@@ -2,8 +2,6 @@ package ui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/p10node/k10s/internal/theme"
 )
 
 // ---- theme picker: live preview while browsing ---------------------------
@@ -20,17 +18,17 @@ func (m *Model) handleThemeKey(msg tea.KeyMsg) tea.Cmd {
 	case "up", "shift+tab":
 		if m.themeSave {
 			m.themeSave = false
-			m.themeRow = len(theme.Themes) - 1
+			m.themeRow = len(m.themes) - 1
 		} else {
-			m.themeRow = clamp(m.themeRow-1, 0, len(theme.Themes)-1)
+			m.themeRow = clamp(m.themeRow-1, 0, len(m.themes)-1)
 		}
 		m.previewTheme()
 	case "down":
 		if !m.themeSave {
-			if m.themeRow >= len(theme.Themes)-1 {
+			if m.themeRow >= len(m.themes)-1 {
 				m.themeSave = true
 			} else {
-				m.themeRow = clamp(m.themeRow+1, 0, len(theme.Themes)-1)
+				m.themeRow = clamp(m.themeRow+1, 0, len(m.themes)-1)
 				m.previewTheme()
 			}
 		}
@@ -61,7 +59,9 @@ func (m *Model) saveTheme() tea.Cmd {
 	m.themeIdx = m.themeRow
 	m.themeOpen = false
 	m.themeSave = false
-	m.saveConfig()
+	if err := m.saveConfig(); err != nil {
+		return nil
+	}
 	m.toast = "theme → " + m.th().Name + " (saved)"
 	return nil
 }

@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -284,6 +287,78 @@ func TestThemePickerDownStopsAtSave(t *testing.T) {
 	}
 	if m.themeRow != len(theme.Themes)-1 {
 		t.Errorf("themeRow = %d, want it clamped to the last theme", m.themeRow)
+	}
+}
+
+func TestCustomThemeAppearsInPickerAndCanBeRestored(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("K10S_CONFIG", filepath.Join(root, "config.yaml"))
+	themeDir := filepath.Join(root, "themes")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `name: demo-custom
+bg: "#101828"
+fg: "#f2f4f7"
+subtle: "#98a2b3"
+border: "#344054"
+border_on: "#53b1fd"
+accent: "#53b1fd"
+accent2: "#b692f6"
+ok: "#32d583"
+warn: "#fec84b"
+err: "#f97066"
+sel_bg: "#1d2939"
+sel_fg: "#ffffff"
+`
+	if err := os.WriteFile(filepath.Join(themeDir, "demo-custom.yaml"), []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(config.Config{Theme: "demo-custom", Onboarded: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(mock.New(""))
+	if m.th().Name != "demo-custom" {
+		t.Fatalf("restored theme = %q, want demo-custom", m.th().Name)
+	}
+	m.openThemePicker()
+	if len(m.themes) != len(theme.Themes)+1 {
+		t.Errorf("picker has %d themes, want %d", len(m.themes), len(theme.Themes)+1)
+	}
+}
+
+func TestThemePickerKeepsSelectionAndSaveVisibleWithManyThemes(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 22})
+	base := theme.Themes[0]
+	for i := 0; i < 30; i++ {
+		custom := base
+		custom.Name = fmt.Sprintf("custom-%02d", i)
+		m.themes = append(m.themes, custom)
+	}
+	m.openThemePicker()
+	m.themeRow = len(m.themes) - 1
+	m.previewTheme()
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "custom-29") {
+		t.Error("picker did not keep the selected theme in its visible viewport")
+	}
+	if !strings.Contains(view, "Save") {
+		t.Error("picker pushed the Save button outside the terminal")
+	}
+}
+
+func TestThemePickerDoesNotHideConfigSaveFailure(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	badPath := t.TempDir()
+	t.Setenv("K10S_CONFIG", badPath) // writing a file over this directory fails
+	m.openThemePicker()
+	m.handleThemeKey(key("enter"))
+
+	if !strings.Contains(m.toast, "config save failed") {
+		t.Fatalf("theme picker hid persistence failure behind success toast: %q", m.toast)
 	}
 }
 

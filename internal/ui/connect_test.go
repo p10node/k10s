@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,6 +62,33 @@ func TestStartupSwapsInSource(t *testing.T) {
 	}
 	if v := m.View(); strings.Contains(v, "connecting to") {
 		t.Errorf("spinner still on screen after connecting:\n%s", v)
+	}
+}
+
+func TestStartupKeepsCustomThemeErrorsVisibleThroughConnect(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("K10S_CONFIG", filepath.Join(root, "config.yaml"))
+	themeDir := filepath.Join(root, "themes")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(themeDir, "broken.yaml"), []byte("name: broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewStartup(Startup{
+		Kinds:   mock.New("").Kinds(),
+		Context: "alpha",
+		Connect: func(string) (domain.Source, string) { return mock.New(""), "" },
+	})
+	if !strings.Contains(m.toast, "broken.yaml") {
+		t.Fatalf("startup toast hid custom-theme error: %q", m.toast)
+	}
+
+	cmd := m.connectCmd("")
+	m.Update(cmd())
+	if !strings.Contains(m.toast, "broken.yaml") {
+		t.Fatalf("connected toast hid custom-theme error: %q", m.toast)
 	}
 }
 

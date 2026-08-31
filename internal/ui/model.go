@@ -95,6 +95,7 @@ type Model struct {
 	src       domain.Source
 	namespace string
 
+	themes   []theme.Theme
 	themeIdx int
 	focus    focusPane
 
@@ -125,6 +126,9 @@ type Model struct {
 	pmode promptMode
 	input textinput.Model
 	toast string
+	// themeWarn survives startup connection toasts so malformed custom
+	// theme files are actually visible on the production NewStartup path.
+	themeWarn string
 
 	cfg aiConfig
 
@@ -250,10 +254,12 @@ func New(src domain.Source) *Model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.CharLimit = 512
+	themes, themeErr := theme.Load()
 
 	m := &Model{
 		src:       src,
 		namespace: src.DefaultNamespace(),
+		themes:    themes,
 		themeIdx:  0,
 		focus:     focusMain,
 		input:     ti,
@@ -270,6 +276,10 @@ func New(src domain.Source) *Model {
 			key:      "",
 		},
 	}
+	if themeErr != nil {
+		m.themeWarn = "custom theme: " + strings.ReplaceAll(themeErr.Error(), "\n", "; ")
+		m.toast = m.themeWarn
+	}
 	m.loadConfig()
 	return m
 }
@@ -282,7 +292,7 @@ func (m *Model) loadConfig() {
 		return
 	}
 	if c.Theme != "" {
-		for i, t := range theme.Themes {
+		for i, t := range m.themes {
 			if t.Name == c.Theme {
 				m.themeIdx = i
 			}
@@ -339,7 +349,7 @@ func (m *Model) loadConfig() {
 
 // saveConfig persists the current settings; failures surface as a toast but
 // never interrupt the UI.
-func (m *Model) saveConfig() {
+func (m *Model) saveConfig() error {
 	providers := []string{"openai", "anthropic"}
 	// The context is saved as the namespace's address — which cluster it was
 	// chosen on — so while a switch is in flight the one being switched *to*
@@ -369,9 +379,17 @@ func (m *Model) saveConfig() {
 	if err != nil {
 		m.toast = "config save failed: " + err.Error()
 	}
+	return err
 }
 
-func (m *Model) th() theme.Theme { return theme.Themes[m.themeIdx] }
+func (m *Model) th() theme.Theme { return m.themes[m.themeIdx] }
+
+func (m *Model) withThemeWarning(status string) string {
+	if m.themeWarn == "" {
+		return status
+	}
+	return m.themeWarn + "   ·   " + status
+}
 
 func (m *Model) kinds() []domain.Kind { return m.src.Kinds() }
 
@@ -1349,11 +1367,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "shift+tab":
 		return m.focusNext(-1)
 	case "T":
-		m.themeIdx = (m.themeIdx + 1) % len(theme.Themes)
+		m.themeIdx = (m.themeIdx + 1) % len(m.themes)
 		m.toast = "theme → " + m.th().Name
 		m.saveConfig()
 	case "ctrl+t":
-		m.themeIdx = (m.themeIdx - 1 + len(theme.Themes)) % len(theme.Themes)
+		m.themeIdx = (m.themeIdx - 1 + len(m.themes)) % len(m.themes)
 		m.toast = "theme → " + m.th().Name
 		m.saveConfig()
 	case "z":
@@ -1466,13 +1484,13 @@ func (m *Model) scrollModal(delta int) {
 	case m.themeOpen:
 		if m.themeSave && delta < 0 {
 			m.themeSave = false
-			m.themeRow = len(theme.Themes) - 1
+			m.themeRow = len(m.themes) - 1
 		} else if !m.themeSave {
 			next := m.themeRow + delta
-			if next >= len(theme.Themes) {
+			if next >= len(m.themes) {
 				m.themeSave = true
 			} else {
-				m.themeRow = clamp(next, 0, len(theme.Themes)-1)
+				m.themeRow = clamp(next, 0, len(m.themes)-1)
 			}
 		}
 		m.previewTheme()
@@ -2400,7 +2418,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if zone.Get("thm:save").InBounds(msg) {
 			return m.saveTheme()
 		}
-		for i := range theme.Themes {
+		for i := range m.themes {
 			if zone.Get(fmt.Sprintf("thm:%d", i)).InBounds(msg) {
 				m.themeRow = i
 				m.themeSave = false

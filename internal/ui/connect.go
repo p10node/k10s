@@ -38,7 +38,7 @@ func NewStartup(s Startup) *Model {
 	m.connect = s.Connect
 	m.connecting = true
 	m.connName = s.Context
-	m.toast = "connecting…"
+	m.toast = m.withThemeWarning("connecting…")
 	return m
 }
 
@@ -56,7 +56,7 @@ func (m *Model) connectCmd(name string) tea.Cmd {
 	if name == "" {
 		m.connName = m.src.ClusterInfo().Context
 	}
-	m.toast = "… connecting"
+	m.toast = m.withThemeWarning("… connecting")
 	return func() tea.Msg {
 		src, warn := fn(name)
 		return srcConnectedMsg{gen: gen, src: src, warn: warn}
@@ -75,7 +75,7 @@ func (m *Model) handleConnected(msg srcConnectedMsg) tea.Cmd {
 	}
 	m.connecting = false
 	if msg.src == nil {
-		m.toast = "✗ could not connect"
+		m.toast = m.withThemeWarning("✗ could not connect")
 		return nil
 	}
 	old := m.src
@@ -93,15 +93,15 @@ func (m *Model) handleConnected(msg srcConnectedMsg) tea.Cmd {
 	m.rowMem = map[string]int{}
 	switch {
 	case msg.warn != "":
-		m.toast = msg.warn
+		m.toast = m.withThemeWarning(msg.warn)
 	case m.firstRun:
 		// Said once, in the status bar, instead of a first-run dialog
 		// standing between you and the cluster.
 		m.firstRun = false
-		m.toast = "connected to " + m.src.ClusterInfo().Context +
-			"   ·   /help for keys · /settings for the CLI name and updates"
+		m.toast = m.withThemeWarning("connected to " + m.src.ClusterInfo().Context +
+			"   ·   /help for keys · /settings for the CLI name and updates")
 	default:
-		m.toast = "connected to " + m.src.ClusterInfo().Context
+		m.toast = m.withThemeWarning("connected to " + m.src.ClusterInfo().Context)
 	}
 	return nil
 }
