@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -884,12 +883,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionResultMsg:
 		m.busy = false
+		var resumeMouse tea.Cmd
+		if msg.resumeMouse {
+			resumeMouse = m.resumeMouseAfterExec()
+		}
 		if msg.err != nil {
 			m.toast = "✗ " + msg.err.Error()
 		} else {
 			m.toast = msg.toast
 		}
-		return m, nil
+		return m, resumeMouse
 
 	case updateCheckMsg:
 		return m, m.handleUpdateCheck(msg)
@@ -1025,11 +1028,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = "✗ " + msg.err.Error()
 			return m, nil
 		}
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
+		c, err := editorCommand(os.Getenv("EDITOR"), msg.path)
+		if err != nil {
+			return m, func() tea.Msg {
+				return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
+			}
 		}
-		c := exec.Command(editor, msg.path)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 		})
@@ -2040,7 +2044,7 @@ func (m *Model) startShell(kind, ns, name string) tea.Cmd {
 		return nil
 	}
 	return tea.Exec(cmd, func(err error) tea.Msg {
-		return actionResultMsg{toast: "✓ shell session closed", err: err}
+		return actionResultMsg{toast: "✓ shell session closed", err: err, resumeMouse: true}
 	})
 }
 

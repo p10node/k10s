@@ -121,9 +121,11 @@ func New(path, context string) (*Client, error) {
 		CurrentContext: cur,
 		Server:         restCfg.Host,
 	}
-	if v, err := disco.ServerVersion(); err == nil {
-		c.Version = v.GitVersion
+	v, err := disco.ServerVersion()
+	if err != nil {
+		return nil, fmt.Errorf("server version: %w", err)
 	}
+	c.Version = v.GitVersion
 	return c, nil
 }
 

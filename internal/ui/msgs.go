@@ -38,10 +38,11 @@ type textResultMsg struct {
 }
 
 // actionResultMsg lands after an async mutating call (delete, restart,
-// scale, cordon, drain, apply).
+// scale, cordon, drain, apply), or after an external terminal command.
 type actionResultMsg struct {
-	toast string
-	err   error
+	toast       string
+	err         error
+	resumeMouse bool
 }
 
 // srcConnectedMsg lands when the backend built at startup is ready (or when

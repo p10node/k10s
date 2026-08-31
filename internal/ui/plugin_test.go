@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,6 +133,24 @@ func TestPluginVariablesIncludeSelectedRowAndColumns(t *testing.T) {
 	}
 	if vars.Columns["NAME"] != m.curName() {
 		t.Errorf("NAME column = %q, want %q", vars.Columns["NAME"], m.curName())
+	}
+}
+
+func TestForegroundPluginResultRestoresMouseCapture(t *testing.T) {
+	for _, err := range []error{nil, errors.New("exit status 1")} {
+		m := newTestModel(t, mock.New(""))
+		item := plugin.Named{Name: "foreground"}
+		msg := foregroundPluginResult(item, "Foreground", err)
+		if !msg.resumeMouse {
+			t.Fatalf("foreground result with err %v did not request mouse restoration", err)
+		}
+		_, cmd := m.Update(msg)
+		if cmd == nil {
+			t.Fatalf("foreground result with err %v returned no mouse command", err)
+		}
+		if got := fmt.Sprintf("%T", cmd()); got != "tea.enableMouseCellMotionMsg" {
+			t.Fatalf("foreground result command = %s, want mouse cell-motion enable", got)
+		}
 	}
 }
 
