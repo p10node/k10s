@@ -112,9 +112,30 @@ func (m *Model) viewHeader(l layout) Block {
 	if ready < nn {
 		nodeCol = th.Warn
 	}
-	line0 := brand + sep + s(th.Accent2).Render(ci.Context) +
+	// "0/0 ready" would be a claim about a cluster we have not counted.
+	// With no nodes in hand — still connecting, or nothing to connect to —
+	// the header says nothing instead.
+	nodeTxt := fmt.Sprintf("%d/%d ready", ready, len(nodes))
+	if len(nodes) == 0 {
+		nodeTxt, nodeCol = "—", th.Subtle
+	}
+	ctxTxt := ci.Context
+	if ctxTxt == "" {
+		ctxTxt = "no context"
+	}
+	ctxCol := th.Accent2
+	// The demo says so on every frame, not once in a toast that scrolls
+	// away. Everything else in this header — the version, the node count,
+	// the gauges below — is sample data while this is showing.
+	demoTag := ""
+	if m.demoMode() {
+		ctxCol = th.Warn
+		demoTag = s(th.Warn).Bold(true).Render(" DEMO") +
+			s(th.Subtle).Render(" sample data · :ctx to leave")
+	}
+	line0 := brand + sep + s(ctxCol).Render(ctxTxt) + demoTag +
 		sep + s(th.Subtle).Render("ver ") + s(th.Fg).Render(ci.Version) +
-		sep + s(th.Subtle).Render("nodes ") + s(nodeCol).Render(fmt.Sprintf("%d/%d ready", ready, len(nodes)))
+		sep + s(th.Subtle).Render("nodes ") + s(nodeCol).Render(nodeTxt)
 
 	// Right-hand buttons: namespace, then theme. Both are clickable and
 	// both say what they currently are, so the header doubles as status.
@@ -138,8 +159,16 @@ func (m *Model) viewHeader(l layout) Block {
 		s(th.Bg).Render("    ") +
 		s(th.Subtle).Bold(true).Render("MEM  ") + gauge(th, memPct, 16) +
 		s(th.Subtle).Render(fmt.Sprintf("  %.0f/%d GiB", usedGiB, nn*nodeGiB))
-		// s(th.Bg).Render("    ") +
-		// s(th.Subtle).Render("per-node view → Resources ▸ Nodes")
+	// nn is clamped to 1 so the averages above cannot divide by zero, which
+	// with no nodes at all would print "0.0/16 cores" — a capacity figure for
+	// a cluster that isn't there. Say nothing instead.
+	if len(nodes) == 0 {
+		totals = s(th.Subtle).Bold(true).Render(" CPU  ") + s(th.Subtle).Render("—") +
+			s(th.Bg).Render("    ") +
+			s(th.Subtle).Bold(true).Render("MEM  ") + s(th.Subtle).Render("—")
+	}
+	// s(th.Bg).Render("    ") +
+	// s(th.Subtle).Render("per-node view → Resources ▸ Nodes")
 
 	lines := []string{
 		line0,
@@ -487,6 +516,16 @@ func (m *Model) viewMain(w, h int) Block {
 		}, body)
 	}
 
+	// No cluster: the panel says so and lists the way in. This comes after
+	// the modes above on purpose — :ctx and /setup are exactly what you
+	// reach for from here, so they must still be able to take the panel.
+	if m.offline {
+		return Panel(th, PanelOpts{
+			Title: "No cluster", Tag: zoomTag, TagPlain: zoomPlain,
+			BorderCol: th.Warn, Focused: focused, W: w, H: h,
+		}, m.noClusterLines(inner))
+	}
+
 	nsLabel := m.namespace
 	if nsLabel == domain.AllNamespaces {
 		nsLabel = "all namespaces"
@@ -716,6 +755,20 @@ func (m *Model) viewActions(w, h int) Block {
 	}
 	inner := w - 2
 	r := m.res()
+
+	// With no cluster there is no object under the cursor, so every action
+	// in this pane would be a button that only produces an error. The pane
+	// says what is missing instead.
+	if m.offline {
+		return Panel(th, PanelOpts{Title: "Actions", Focused: false, W: w, H: h}, []string{
+			s(th.Subtle).Render(" " + trunc("no cluster", inner-1)),
+			s(th.Border).Render(strings.Repeat("╌", inner)),
+			s(th.Subtle).Render(" " + trunc("nothing to act on", inner-1)),
+			"",
+			s(th.Accent2).Render(" r") + s(th.Subtle).Render(trunc("  retry", inner-3)),
+			s(th.Accent2).Render(" /setup") + s(th.Subtle).Render(trunc("  guide", inner-8)),
+		})
+	}
 
 	lines := []string{
 		s(th.Subtle).Render(" " + trunc(r.Short+"/"+m.curName(), inner-1)),

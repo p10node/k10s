@@ -78,8 +78,8 @@ func (s *Source) ClusterInfo() domain.ClusterInfo {
 		Cluster:    contexts[s.ctxIdx] + "-cluster",
 		User:       "demo-user",
 		Groups:     "demo-team",
-		Kubeconfig: "/mock/kubeconfig",
-		Server:     "https://k8s.example.com:6443",
+		Kubeconfig: "(built-in demo — no kubeconfig)",
+		Server:     "(built-in demo — no API server)",
 		Version:    clusterVersion,
 	}
 }

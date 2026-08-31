@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,22 +19,58 @@ import (
 	"github.com/p10node/k10s/internal/version"
 )
 
-// newSource tries the real cluster first (ctx, or kubeconfig's
-// current-context when empty) and falls back to the offline demo when no
-// cluster is reachable — same behaviour k10s has always documented ("mock
-// mode — not connected to a real cluster"), just now backed by a real
-// attempt first.
+// newSource connects to the real cluster (ctx, or kubeconfig's
+// current-context when empty). When there is none it returns **no backend**
+// and the reason, and the UI shows its "No cluster" panel.
+//
+// It used to hand back the bundled demo cluster instead. That meant a
+// machine with no kubeconfig opened onto forty pods, three nodes and a
+// CrashLoopBackOff that existed nowhere — labelled only by a line in the
+// status bar. Fake data is worth having (`k10s demo`, cmd/shot, the tests)
+// but never as the answer to "what is on this machine".
+//
+// Two different failures land here and both count as "no cluster":
+// kubeconfig that will not load or name a context, and a context whose API
+// server does not answer (deleted cluster, VPN down, minikube not started).
+// The second one builds a perfectly healthy client — only Ping catches it.
 //
 // This can block for a long time: an API server behind a downed VPN, or an
 // exec credential plugin that stalls, both land here. So it is never called
 // before the program starts — the UI runs it as a background command and
 // shows a spinner meanwhile (see ui.Startup).
 func newSource(ctx string) (domain.Source, string) {
+	// The demo is a context like any other, so everything that can name a
+	// context can reach it — `k10s demo`, `/demo`, and `:ctx` — and leaving
+	// it is picking a different context. The warning rides along with it and
+	// is repeated in the header for as long as it is on screen: sample data
+	// has to keep saying so, not say so once.
+	if domain.IsDemoContext(ctx) {
+		return mock.New(ctx), "demo mode — sample data, not a real cluster · :ctx leaves"
+	}
+
 	store, err := k8s.NewStore("", ctx)
 	if err != nil {
-		return mock.New(""), "mock mode — " + err.Error()
+		return nil, noClusterReason(err)
+	}
+	if err := store.Ping(); err != nil {
+		store.Close()
+		return nil, noClusterReason(err)
 	}
 	return store, ""
+}
+
+// noClusterReason turns a client-go failure into the single line shown under
+// "No cluster". Those errors run to several sentences and end in advice
+// aimed at a different tool ("try setting KUBERNETES_MASTER…"), so only the
+// first, useful clause survives.
+func noClusterReason(err error) string {
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	for _, cut := range []string{", try setting", "; have you", " Try "} {
+		if i := strings.Index(msg, cut); i > 0 {
+			msg = msg[:i]
+		}
+	}
+	return strings.TrimRight(msg, " .")
 }
 
 func main() {
@@ -66,6 +103,15 @@ func main() {
 	// alone — no request, so no hang. The connection itself happens once the
 	// event loop is running.
 	ctxNames, curCtx := k8s.KubeContexts("")
+
+	// `k10s demo` opens on the demo context instead of kubeconfig's. That is
+	// the whole implementation: the demo is not a mode the program is in,
+	// only the context it started on. Without the argument k10s shows what
+	// this machine can actually reach, and nothing else.
+	if len(os.Args) > 1 && (os.Args[1] == "demo" || os.Args[1] == "--demo") {
+		curCtx = domain.DemoContext
+	}
+
 	m := ui.NewStartup(ui.Startup{
 		Kinds:    k8s.Kinds(),
 		Contexts: ctxNames,
@@ -146,9 +192,15 @@ func usage() {
 
 usage:
   k10s              open the dashboard against the current kubeconfig context
+  k10s demo         open the built-in sample cluster (fake data, no cluster
+                    needed) — k10s never shows this unless you ask for it
   k10s update       install the newest release over this binary
   k10s --version    print the running build
   k10s --help       this text
+
+No cluster? k10s reads $KUBECONFIG, else ~/.kube/config, exactly like
+kubectl. /setup inside the TUI (or docs/cluster-setup.md) has the install
+and kubeconfig links.
 
 Everything else is inside the TUI: "/" for choosers and actions, ":" to act
 on the current view, /help for the full keymap.`)

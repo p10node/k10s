@@ -6,8 +6,10 @@
 # Needs charmbracelet/vhs, a JetBrainsMono Nerd Font install (the header's ⎈
 # and the CPU/MEM bars need the glyph coverage) and a local `./k10s` build.
 #
-# KUBECONFIG points nowhere on purpose: every published frame runs on the
-# offline demo backend, so no real cluster ever leaks into the docs. The
+# `./k10s demo` and a KUBECONFIG pointing nowhere, both on purpose: every
+# published frame runs on the offline demo backend, so no real cluster ever
+# leaks into the docs. The subcommand is what selects it — without it k10s
+# shows its "No cluster" panel rather than standing in with sample data. The
 # throwaway GIF goes to /tmp — the PNG is the only artifact we keep.
 
 Output "/tmp/k10s-screenshot-scratch.gif"
@@ -30,7 +32,7 @@ Env K10S_CONFIG "/tmp/k10s-screenshot-config.yaml"
 # The launch itself is not interesting — hide it, and let the alt screen hide
 # the shell prompt behind it.
 Hide
-Type "./k10s"
+Type "./k10s demo"
 Enter
 Sleep 6s
 

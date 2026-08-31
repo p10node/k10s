@@ -63,8 +63,11 @@ func (c SlashCommand) prefixed(head string) bool {
 var clusterCommands = []SlashCommand{
 	{Name: "/theme", Desc: "theme picker with live preview"},
 	{Name: "/settings", Desc: "CLI name, update check"},
+	{Name: "/mouse", Desc: "toggle mouse capture — off lets you select & copy"},
 	{Name: "/update", Args: "[skip]", Desc: "check for a newer k10s and install it", OptArgs: true},
 	{Name: "/version", Desc: "which build is running, and what the last check found"},
+	{Name: "/demo", Desc: "open k10s's built-in demo cluster — sample data, :ctx leaves it"},
+	{Name: "/setup", Desc: "no cluster? how to install kubectl and write ~/.kube/config"},
 	{Name: "/help", Desc: "keybindings and commands"},
 }
 
@@ -75,7 +78,6 @@ var appCommands = []SlashCommand{
 	{Name: ":search", Args: "<term>", Desc: "filter the resource list (left pane)"},
 	{Name: ":scale", Args: "<n>", Desc: "scale the selected workload to n replicas"},
 	{Name: ":filter", Args: "<term>", Desc: "filter rows of the current table"},
-	{Name: ":mouse", Desc: "toggle mouse capture — off lets you select & copy"},
 	{Name: ":ctx", Full: ":context", Args: "[name]", Desc: "kube contexts — a name switches straight to it",
 		Alt: []string{":context", ":contexts"}, OptArgs: true},
 	{Name: ":aliases", Desc: "every :name that opens a resource view", Alt: []string{":alias"}},
@@ -292,9 +294,10 @@ func Help() string {
                         built-in keys win unless override: true
 
   COPY / SELECT
-    ctrl+s              toggle mouse capture. With it OFF the terminal does
-                        its own selection, so you can drag-select and copy;
-                        clicking rows/buttons resumes when you turn it back on.
+    ctrl+s              toggle mouse capture (or /mouse). With it OFF the
+                        terminal does its own selection, so you can
+                        drag-select and copy; clicking rows/buttons resumes
+                        when you turn it back on.
 
   SEARCH EVERYTHING
     ctrl+p              one box that finds resource kinds and objects.
@@ -307,8 +310,8 @@ func Help() string {
 
   PROMPT
     /                   k10s's own settings (theme, settings, update, help)
-    :                   k9s-style: :po, :deploy, :ns … plus search, filter,
-                        scale and mouse for the view you are on
+    :                   k9s-style: :po, :deploy, :ns … plus search, filter
+                        and scale for the view you are on
     k                   open it with "k " ready to type a command
     ctrl+z              grow the box to half the screen; typing a long
                         command grows it automatically
@@ -332,6 +335,8 @@ func Help() string {
 
     /theme              theme picker, previews live (tab → Save, esc cancels)
     /settings           CLI name + update check, in one dialog
+    /mouse              same as ctrl+s: release the mouse so the terminal
+                        can drag-select and copy
     /update             check GitHub for a newer k10s and install it over
                         this binary. Confirms first, verifies the download
                         against the release checksums, then offers to restart
@@ -342,6 +347,16 @@ func Help() string {
                         without turning the check off
     /version            which build this is, where updates come from, and
                         what the last check found
+    /demo               switch to k10s's built-in demo cluster: sample data,
+                        no cluster and no kubeconfig needed. It is a context
+                        (k10s-demo), not a mode — the header says DEMO for as
+                        long as it is on screen, and picking any other
+                        context in :ctx leaves it. "k10s demo" from a shell
+                        opens straight into it.
+    /setup              no cluster? how to install kubectl and get a
+                        ~/.kube/config, with links to the official docs.
+                        Readable with nothing connected — which is when it
+                        is needed.
     /help               this screen
 
     :po :deploy …       go to a resource view, k9s-style. Every kind
@@ -365,7 +380,9 @@ func Help() string {
     :ns                 the namespace switcher — the Namespaces table, the
                         same one the header's ns button opens
     :ns <name>          switch namespace without leaving this view
-    :ctx                the context picker
+    :ctx                the context picker. Lists kubeconfig's contexts plus
+                        k10s-demo, labelled as the demo it is; the legend
+                        under the list says so too.
     :ctx <name>         switch straight to that context — reconnects for
                         this session only. k10s always opens on kubeconfig's
                         current-context, so "kubectl config use-context" is
@@ -374,8 +391,17 @@ func Help() string {
     :search <term>      filter the resource list (left pane)
     :scale <n>          scale the selected deployment/statefulset/replicaset
     :filter <term>      filter rows of the current table
-    :mouse              same as ctrl+s
     :q                  quit (:quit, :qa too)
+
+  NO CLUSTER
+    k10s shows what this machine can actually reach and nothing else: no
+    kubeconfig, or a context whose API server does not answer, and the main
+    panel says "No cluster" instead of inventing rows.
+    r                   retry the connection
+    :ctx                pick another context from kubeconfig
+    /setup              install/kubeconfig links
+    /demo               the built-in sample cluster, clearly labelled — the
+                        only way to see fake data
 
   MISC
     T / ctrl+t          next / previous theme (or click the theme button /

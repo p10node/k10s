@@ -31,11 +31,30 @@ func (m *Model) showContextChooser() {
 
 // ctxChoices returns the contexts to show, always in the same order.
 //
+// Three sources, merged: whatever the current backend serves, kubeconfig's
+// own list as read at startup, and the demo context. The middle one is what
+// makes the demo escapable — the demo backend serves only its own contexts,
+// so without it "pick a real context to leave" would have nothing to pick.
+// The last one is what makes it reachable from a real cluster, and it is
+// offered unconditionally: it needs no kubeconfig and can never fail.
+//
 // This is called on every render as well as from the key handler, so an
 // unstable order would mean the highlighted row moves under the cursor
 // between frames. Sorting here keeps that true whatever a backend returns.
 func (m *Model) ctxChoices() []string {
-	all := append([]string(nil), m.src.Contexts()...)
+	seen := map[string]bool{}
+	all := make([]string, 0, len(m.kubeCtxs)+4)
+	add := func(names ...string) {
+		for _, n := range names {
+			if n != "" && !seen[n] {
+				seen[n] = true
+				all = append(all, n)
+			}
+		}
+	}
+	add(m.src.Contexts()...)
+	add(m.kubeCtxs...)
+	add(domain.DemoContext)
 	domain.SortNames(all)
 
 	q := strings.ToLower(m.ctxFilter)
@@ -60,9 +79,11 @@ func (m *Model) chooseContext() tea.Cmd {
 	}
 	name := choices[clamp(m.ctxIdx, 0, len(choices)-1)]
 	m.mode = modeTable
-	// While connecting, "the current context" is only the one we are
-	// *trying* — picking it again is a retry, not a no-op.
-	if name == m.src.ClusterInfo().Context && !m.connecting {
+	// While connecting — or after that attempt failed — "the current
+	// context" is only the one we are *trying*, so picking it again is a
+	// retry, not a no-op. Answering "already on X" from the No cluster
+	// panel would be a dead end, and the wrong claim besides.
+	if name == m.src.ClusterInfo().Context && !m.connecting && !m.offline {
 		m.toast = "already on " + name
 		return nil
 	}
@@ -86,6 +107,9 @@ func (m *Model) contextBody(inner, rows int) []string {
 		s(th.Border).Render(strings.Repeat("╌", inner)),
 	}
 
+	// How much of the row the right-hand label may take. Long context names
+	// are the norm, so the label is what gets dropped when it does not fit,
+	// never the name.
 	cur := clamp(m.ctxIdx, 0, maxi(0, len(choices)-1))
 	for i, c := range choices {
 		selected := i == cur
@@ -107,12 +131,25 @@ func (m *Model) contextBody(inner, rows int) []string {
 		row := st(th.Accent).Render(marker) + st(bg).Render(" ") +
 			st(numCol).Render(fmt.Sprintf("%*d", numW, i+1)) + st(bg).Render(" ") +
 			st(fg).Bold(selected).Render(trunc(c, inner-numW-14))
+
+		// The demo says so on its own row. A context list is exactly where
+		// somebody decides what they are looking at, so the one entry that
+		// is not a cluster cannot be told apart by its name alone.
+		label, labelCol := "", th.Ok
+		if domain.IsDemoContext(c) {
+			label, labelCol = "k10s demo · sample data", th.Warn
+		}
 		if c == current {
-			gap := inner - lipgloss.Width(row) - len("current") - 1
-			if gap < 1 {
-				gap = 1
+			label, labelCol = "current", th.Ok
+			if domain.IsDemoContext(c) {
+				label, labelCol = "current · k10s demo, sample data", th.Warn
 			}
-			row += st(bg).Render(spaces(gap)) + st(th.Ok).Render("current")
+		}
+		if label != "" {
+			gap := inner - lipgloss.Width(row) - len(label) - 1
+			if gap >= 1 {
+				row += st(bg).Render(spaces(gap)) + st(labelCol).Render(label)
+			}
 		}
 		out = append(out, m.mark(fmt.Sprintf("ctxp:%d", i), padBG(row, inner, bg)))
 	}
@@ -120,5 +157,19 @@ func (m *Model) contextBody(inner, rows int) []string {
 	if len(choices) == 0 {
 		out = append(out, s(th.Subtle).Render("   no contexts in kubeconfig"))
 	}
+
+	// The legend, once, under the list: what the demo entry is and how to
+	// leave it. Without it "k10s-demo" is just another name in a list of
+	// names, and the whole point is that it is not one. Two lines, because
+	// the sentence that fits on one is the one that says too little.
+	tag := "   " + domain.DemoContext + "*  "
+	body := maxi(0, inner-len(tag))
+	out = append(out,
+		s(th.Border).Render(strings.Repeat("╌", inner)),
+		s(th.Warn).Render(tag)+
+			s(th.Subtle).Render(trunc("k10s's own demo cluster — sample data, not from kubeconfig.", body)),
+		s(th.Bg).Render(spaces(len(tag)))+
+			s(th.Subtle).Render(trunc("Nothing in it is real. Pick any other context to leave it.", body)),
+	)
 	return out
 }

@@ -3,8 +3,9 @@
 #   vhs assets/demo.tape        (or `just demo`)
 #
 # Needs `k10s` on PATH (`just install`) and charmbracelet/vhs installed.
-# Runs against the offline demo backend when no cluster is reachable, which
-# is what every published frame should use — see docs/build-in-public.md.
+# `k10s demo` runs the offline demo backend, which is what every published
+# frame should use — see docs/build-in-public.md. Plain `k10s` would show
+# whatever cluster the recording machine can reach, or none at all.
 #
 # The mouse is k10s' differentiator and vhs cannot record a cursor: pair this
 # with a real screen capture for the hero clip.
@@ -17,7 +18,7 @@ Set Width 1200
 Set Height 700
 Set Padding 20
 
-Type "k10s"
+Type "k10s demo"
 Enter
 Sleep 3s
 

@@ -151,6 +151,15 @@ failing.
 table and marking the active one `current`. `enter` reconnects. Same idea as
 the namespace chooser: full width beats a cramped popup for names this long.
 
+The list always ends up holding one entry that is not a cluster:
+**`k10s-demo`**, the built-in demo. It is labelled on its own row
+(`k10s demo · sample data`) and explained in a legend under the list, because
+a context list is exactly where someone decides what they are looking at, and
+a name alone would not tell them. Picking any other context **leaves the
+demo** — that is the only exit, and it is the same gesture as any other
+switch. The list stays complete inside the demo: kubeconfig's contexts are
+merged in from the startup read, so the way out is always on screen.
+
 ### Busy state
 
 Any action that has to wait — describe, YAML, logs, top, AI, and the
@@ -195,6 +204,38 @@ centred spinner, an indeterminate bar and a one-line explanation — never
 "no resources found", which would be a lie. The repaint tick runs faster
 (150ms) while loading and backs off to 2s once synced.
 
+### Demo
+
+While the demo backend is on screen the header shows its context in the warn
+colour plus a `DEMO  sample data · :ctx to leave` marker — on every frame, not
+in a toast that scrolls away, because every number and gauge beside it is
+sample data. `k10s demo` (shell), `/demo` (anywhere) and `:ctx` all reach it;
+picking another context leaves it. See
+[backends.md](backends.md#the-demo-as-a-context).
+
+### No cluster
+
+When the connection settles with nothing behind it — no kubeconfig, or a
+context whose API server does not answer — the main panel becomes a
+warn-bordered **No cluster** panel: the reason client-go gave, what k10s
+reads (`$KUBECONFIG`, else `~/.kube/config`), three numbered steps with
+links, and the two commands that check the connection from outside k10s.
+`r` retries, `:ctx` picks another context, `/setup` opens the long guide
+([cluster-setup.md](cluster-setup.md)).
+
+Nothing on the frame is invented in that state: no rows, no sidebar badges,
+`ver —` and `nodes —` in the header instead of a version and a `0/0 ready`,
+and no CPU/MEM totals — those are computed against a per-node capacity
+constant, so with no nodes they would be a capacity figure for a cluster
+that is not there. The Actions pane says "nothing to act on" rather than
+listing buttons that can only produce errors.
+
+This is why the demo backend is opt-in (`k10s demo`). It used to be the
+fallback here, which meant a machine with no cluster showed a full one.
+
+A failed `:ctx` switch is a different case and stays on the cluster you have:
+losing a working session because another cluster is down helps nobody.
+
 ## Search boxes
 
 Neither pane keeps a search box on screen permanently:
@@ -210,7 +251,8 @@ Neither pane keeps a search box on screen permanently:
 
 Header shows the current target (`po/name`). The pane lists **only actions
 that apply to the selected kind** — no dimmed rows. Risky actions (Drain,
-Delete) sit below a rule and are drawn in the error color.
+Delete) sit below a rule and are drawn in the error color. With no cluster
+it lists nothing at all — see [No cluster](#no-cluster).
 
 Notable behavior:
 

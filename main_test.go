@@ -9,11 +9,14 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-
-	"github.com/p10node/k10s/internal/mock"
 )
 
-func TestNewSourceFallsBackWhenAPIServerIsUnreachable(t *testing.T) {
+// An API server that answers with an error is not a cluster, and k10s says
+// so rather than quietly swapping in sample data: newSource returns no
+// source at all plus the reason, and the UI draws the "No cluster" panel.
+// Fake rows are reachable only through the demo context, which is labelled
+// as the demo it is.
+func TestNewSourceReportsNoClusterWhenAPIServerIsUnreachable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "unreachable", http.StatusServiceUnavailable)
 	}))
@@ -38,11 +41,14 @@ func TestNewSourceFallsBackWhenAPIServerIsUnreachable(t *testing.T) {
 	t.Setenv("KUBECONFIG", path)
 
 	src, warning := newSource("")
-	defer src.Close()
-	if _, ok := src.(*mock.Source); !ok {
-		t.Fatalf("source = %T, want offline demo after failed API-server probe", src)
+	if src != nil {
+		src.Close()
+		t.Fatalf("source = %T, want none after a failed API-server probe", src)
 	}
-	if !strings.Contains(warning, "mock mode") || !strings.Contains(warning, "server version") {
-		t.Fatalf("warning = %q, want fallback reason", warning)
+	if warning == "" {
+		t.Fatal("warning is empty, want the reason the cluster did not answer")
+	}
+	if strings.Contains(warning, "mock") || strings.Contains(warning, "demo") {
+		t.Fatalf("warning = %q, want a failure reason, not a fallback to sample data", warning)
 	}
 }

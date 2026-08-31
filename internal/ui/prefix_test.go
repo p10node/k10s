@@ -654,10 +654,14 @@ func TestNamespaceAndContextAreColonCommands(t *testing.T) {
 		}
 	}
 
-	// The "/" set is k10s's own settings and nothing else.
+	// The "/" set is k10s's own settings and its own help — never anything
+	// that names a thing the cluster has. /setup qualifies on the second
+	// count: it is a page about getting connected, readable with no cluster
+	// at all, which is exactly when it is needed. /demo qualifies on the
+	// first: the demo cluster is k10s's own, not something a cluster has.
 	for _, c := range clusterCommands {
 		switch c.Name {
-		case "/theme", "/settings", "/update", "/version", "/help":
+		case "/theme", "/settings", "/mouse", "/update", "/version", "/demo", "/setup", "/help":
 		default:
 			t.Errorf("%q is under / but is not one of k10s's own settings", c.Name)
 		}

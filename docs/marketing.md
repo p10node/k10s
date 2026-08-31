@@ -55,8 +55,9 @@ Everything published should be traceable to one of these:
    and selected object go into the prompt, so "why is this unhealthy?" means
    *this* pod. Bring your own key, OpenAI-compatible or Anthropic.
 
-Secondary, in this order: self-update · seven live-previewed themes · works
-with no cluster at all (offline demo) · single static binary · copy mode.
+Secondary, in this order: self-update · seven live-previewed themes · a full
+UI to try with no cluster at all (`k10s demo`) · single static binary · copy
+mode.
 
 ## Proof assets
 
@@ -71,9 +72,10 @@ Claims need artefacts. In priority order:
    performance story is *"the first live version was unusably slow; here is
    what it was and what fixed it."* That post outperforms any feature post,
    because everyone has written the slow version.
-4. **The offline demo mode.** This is the conversion mechanism: `go run .`
-   with no cluster gives a stranger the full UI in one command, at zero risk.
-   Every channel post should mention it.
+4. **The offline demo mode.** This is the conversion mechanism: `go run . demo`
+   gives a stranger the full UI in one command, with no cluster and at zero
+   risk. Every channel post should mention it — with the subcommand, since
+   plain `k10s` deliberately shows "No cluster" rather than sample data.
 5. **A social preview image** (GitHub → Settings → Social preview, 1280×640).
    Determines what a shared link looks like in Slack, X and LinkedIn. Without
    it, links look like nothing. Generated: `assets/logo/social-preview.png`.
@@ -99,7 +101,9 @@ Do these before any post. They cost minutes and change every impression.
       there is nothing to `brew`/`curl`.
 - [x] **Sanitise the demo data.** ~~The mock context name and ingress hosts in
       `internal/mock` read like real internal hostnames, and they appear in
-      every screenshot and GIF.~~ Now `prod-eu-west-1` and `*.example.com`.
+      every screenshot and GIF.~~ Now the contexts are `k10s-demo*` and the
+      hosts `*.example.com`, so a demo frame cannot be read as a real
+      cluster — the header also carries a `DEMO` marker.
       Re-check this whenever demo data is added.
 - [ ] **Repo description + topics.** Description = the one-liner. Topics:
       `kubernetes` `k8s` `tui` `terminal` `cli` `bubbletea` `go` `k9s`
