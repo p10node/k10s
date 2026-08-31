@@ -338,7 +338,18 @@ func (s *Store) nodeMetric(name string) (metricSample, bool) {
 func (s *Store) Kinds() []domain.Kind { return Kinds() }
 
 func (s *Store) ClusterInfo() domain.ClusterInfo {
-	return domain.ClusterInfo{Context: s.c.CurrentContext, Server: s.c.Server, Version: s.c.Version}
+	info := domain.ClusterInfo{
+		Context: s.c.CurrentContext, Kubeconfig: s.c.ConfigPath,
+		Server: s.c.Server, Version: s.c.Version,
+	}
+	if current := s.c.RawConfig.Contexts[s.c.CurrentContext]; current != nil {
+		info.Cluster = current.Cluster
+		info.User = current.AuthInfo
+		if auth := s.c.RawConfig.AuthInfos[current.AuthInfo]; auth != nil {
+			info.Groups = strings.Join(auth.ImpersonateGroups, ",")
+		}
+	}
+	return info
 }
 
 func (s *Store) Nodes() []domain.NodeInfo {

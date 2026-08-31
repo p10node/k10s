@@ -187,9 +187,9 @@ Have this ready, verbatim, warm, and short:
 > k9s is great — I still recommend it, and k10s exists because of it. k10s is
 > a different bet: mouse and keyboard treated as equals, every action for the
 > selected object visible on screen instead of memorised, one search box over
-> kinds and objects, and AI with cluster context built in. Much smaller scope,
-> no plugins. If you already have k9s in muscle memory you may not need it.
-> I built it so the people on my team who *don't* have that muscle memory
+> kinds and objects, AI with cluster context built in, and core k9s-style
+> command plugins. If you already have k9s in muscle memory you may not need
+> it. I built it so the people on my team who *don't* have that muscle memory
 > could stop asking me to check pods for them.
 
 That last sentence is the whole story, and it is true. Lead with it.

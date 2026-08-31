@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -26,18 +27,19 @@ func TestApplyAgainstRealDistArtifacts(t *testing.T) {
 	if err != nil {
 		t.Skip("no dist/ — run `just release` first")
 	}
+	// Only this machine's own archive can be installed and then executed,
+	// so the platform comes from the running test binary rather than from
+	// whichever matching name dist/ happens to list last.
+	goos, goarch := runtime.GOOS, runtime.GOARCH
 	var archive string
 	for _, e := range entries {
-		if strings.Contains(e.Name(), "darwin_arm64") || strings.Contains(e.Name(), "linux_amd64") {
+		if strings.Contains(e.Name(), goos+"_"+goarch) {
 			archive = e.Name()
+			break
 		}
 	}
 	if archive == "" {
-		t.Skip("dist/ has no archive for a platform this test can install")
-	}
-	goos, goarch := "darwin", "arm64"
-	if strings.Contains(archive, "linux") {
-		goos, goarch = "linux", "amd64"
+		t.Skipf("dist/ has no %s_%s archive to install", goos, goarch)
 	}
 
 	files := http.FileServer(http.Dir(dist))

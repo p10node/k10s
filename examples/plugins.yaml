@@ -1,0 +1,34 @@
+# k10s plugins — compatible with the core k9s plugins.yaml format.
+plugins:
+  pod-logs:
+    shortCut: Ctrl-L
+    description: Pod logs via kubectl
+    scopes:
+      - po
+    command: kubectl
+    background: false
+    args:
+      - logs
+      - -f
+      - $NAME
+      - -n
+      - $NAMESPACE
+      - --context
+      - $CONTEXT
+
+  restart-deployment:
+    shortCut: Shift-R
+    description: Rollout restart
+    scopes:
+      - deploy
+    command: kubectl
+    confirm: true
+    dangerous: true
+    args:
+      - rollout
+      - restart
+      - deployment/$NAME
+      - -n
+      - $NAMESPACE
+      - --context
+      - $CONTEXT

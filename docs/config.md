@@ -9,6 +9,10 @@ Custom themes live in the adjacent `themes/` folder (normally
 files are documented in [themes.md](themes.md); only the selected theme name
 is stored in `config.yaml`.
 
+Command plugins are separate too: `~/.k10s/plugins.yaml` and YAML snippets
+under `~/.k10s/plugins/`. They use the k9s plugin format and are documented in
+[plugins.md](plugins.md); plugin definitions are never rewritten by k10s.
+
 ## What's saved
 
 ```yaml

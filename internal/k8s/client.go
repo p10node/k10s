@@ -47,6 +47,13 @@ func KubeconfigPath() string {
 	return rules.GetDefaultFilename()
 }
 
+func loadedKubeconfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return KubeconfigPath()
+}
+
 // New loads kubeconfig at path (empty = default resolution) and builds every
 // client against the given context (empty = kubeconfig's current-context).
 func New(path, context string) (*Client, error) {
@@ -109,7 +116,7 @@ func New(path, context string) (*Client, error) {
 		Discovery:      disco,
 		Mapper:         mapper,
 		Metrics:        metrics,
-		ConfigPath:     rules.GetDefaultFilename(),
+		ConfigPath:     loadedKubeconfigPath(path),
 		RawConfig:      raw,
 		CurrentContext: cur,
 		Server:         restCfg.Host,

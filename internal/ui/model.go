@@ -20,6 +20,7 @@ import (
 	"github.com/p10node/k10s/internal/ai"
 	"github.com/p10node/k10s/internal/config"
 	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/plugin"
 	"github.com/p10node/k10s/internal/theme"
 	"github.com/p10node/k10s/internal/update"
 )
@@ -138,6 +139,10 @@ type Model struct {
 	// interchangeably.
 	cli  string
 	clis []string
+
+	// k9s-compatible command plugins loaded at startup.
+	plugins    []plugin.Named
+	pluginWarn string
 
 	// One settings modal: CLI name + AI provider + the update check.
 	setOpen    bool
@@ -276,6 +281,12 @@ func New(src domain.Source) *Model {
 			key:      "",
 		},
 	}
+	plugins, pluginErr := plugin.Load()
+	m.plugins = plugins
+	if pluginErr != nil {
+		m.pluginWarn = "plugins: " + strings.ReplaceAll(pluginErr.Error(), "\n", "; ")
+		m.toast = m.pluginWarn
+	}
 	if themeErr != nil {
 		m.themeWarn = "custom theme: " + strings.ReplaceAll(themeErr.Error(), "\n", "; ")
 		m.toast = m.themeWarn
@@ -385,10 +396,17 @@ func (m *Model) saveConfig() error {
 func (m *Model) th() theme.Theme { return m.themes[m.themeIdx] }
 
 func (m *Model) withThemeWarning(status string) string {
-	if m.themeWarn == "" {
+	warnings := make([]string, 0, 2)
+	if m.themeWarn != "" {
+		warnings = append(warnings, m.themeWarn)
+	}
+	if m.pluginWarn != "" {
+		warnings = append(warnings, m.pluginWarn)
+	}
+	if len(warnings) == 0 {
 		return status
 	}
-	return m.themeWarn + "   ·   " + status
+	return strings.Join(warnings, "   ·   ") + "   ·   " + status
 }
 
 func (m *Model) kinds() []domain.Kind { return m.src.Kinds() }
@@ -1227,6 +1245,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 
+	// Override plugins replace pane-local and global bindings consistently.
+	// Prompt, shell and modals retain ownership because typing or confirming
+	// must never launch a plugin accidentally.
+	if p, ok := m.pluginForKey(key, true); ok {
+		return m.firePlugin(p)
+	}
+
 	// resource list: type-to-filter
 	if m.focus == focusList {
 		switch key {
@@ -1273,6 +1298,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if cmd, handled := m.globalShortcut(msg); handled {
 			return cmd
+		}
+		if !isTypedText(msg) {
+			if p, ok := m.pluginForKey(key, false); ok {
+				return m.firePlugin(p)
+			}
 		}
 		// Bubbletea reports a lone space as KeySpace, not KeyRunes, so it
 		// has to be admitted by hand — without it "custom resources" is
@@ -1321,6 +1351,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// printable runes are treated as search text.
 		if cmd, handled := m.globalShortcut(msg); handled {
 			return cmd
+		}
+		if !isTypedText(msg) {
+			if p, ok := m.pluginForKey(key, false); ok {
+				return m.firePlugin(p)
+			}
 		}
 		if isTypedText(msg) && len(key) < 24 {
 			m.rowSearch += string(msg.Runes)
@@ -1421,6 +1456,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if a.Key == key {
 				return m.fireAction(a)
 			}
+		}
+		if p, ok := m.pluginForKey(key, false); ok {
+			return m.firePlugin(p)
 		}
 	}
 	return nil
@@ -2523,6 +2561,11 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	for _, a := range Actions {
 		if zone.Get("act:" + a.ID).InBounds(msg) {
 			return tea.Batch(m.flashAction(a.ID), m.fireAction(a))
+		}
+	}
+	for _, p := range m.availablePlugins() {
+		if zone.Get("plugin:" + p.Name).InBounds(msg) {
+			return m.firePlugin(p)
 		}
 	}
 

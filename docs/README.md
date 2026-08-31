@@ -9,6 +9,7 @@
 | [keybindings.md](keybindings.md)         | Full key + mouse reference                                  |
 | [commands.md](commands.md)               | Prompt modes, slash commands, search palette, AI settings   |
 | [themes.md](themes.md)                   | Theme list, picker, palette contract, adding a theme        |
+| [plugins.md](plugins.md)                 | k9s-compatible command plugins, variables, examples         |
 | [config.md](config.md)                   | `~/.k10s/config.yaml` — what's saved, when, and how         |
 | [install.md](install.md)                 | Installer script, flags, hosting the short URL, uninstall   |
 | [update.md](update.md)                   | Self-update: version stamps, release matching, installing   |

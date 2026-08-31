@@ -9,6 +9,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/p10node/k10s/internal/domain"
+	"github.com/p10node/k10s/internal/plugin"
 	"github.com/p10node/k10s/internal/theme"
 )
 
@@ -778,6 +779,20 @@ func (m *Model) viewActions(w, h int) Block {
 		row := st(keyCol).Render(marker) + st(th.Border).Render("[") + st(keyCol).Render(a.Key) + st(th.Border).Render("] ") +
 			st(labCol).Bold(flashed).Render(trunc(label, inner-6))
 		lines = append(lines, m.mark("act:"+a.ID, padBG(row, inner, bg)))
+	}
+	plugins := m.availablePlugins()
+	if len(plugins) > 0 {
+		lines = append(lines, s(th.Border).Render(strings.Repeat("╌", inner)))
+	}
+	for _, item := range plugins {
+		shortcut := plugin.NormalizeShortcut(item.ShortCut)
+		keyCol, labelCol := th.Accent2, th.Fg
+		if item.Dangerous {
+			keyCol, labelCol = th.Err, th.Err
+		}
+		row := s(th.Border).Render(" [") + s(keyCol).Render(shortcut) + s(th.Border).Render("] ") +
+			s(labelCol).Render(trunc(pluginLabel(item), inner-len(shortcut)-5))
+		lines = append(lines, m.mark("plugin:"+item.Name, padBG(row, inner, th.Bg)))
 	}
 	return Panel(th, PanelOpts{Title: "Actions", Focused: false, W: w, H: h}, lines)
 }

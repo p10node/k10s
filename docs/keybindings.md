@@ -122,6 +122,10 @@ Confirm modals: `enter`/`y` confirm · `esc`/`n` cancel.
 
 A kind with no logs falls back to **describe** instead of erroring.
 
+Applicable command plugins from `~/.k10s/plugins.yaml` are listed after the
+built-in actions. Their configured shortcut or a click runs them. Built-in
+keys win unless the plugin sets `override: true`; see [plugins.md](plugins.md).
+
 ## Shell
 
 | Key       | Action                                              |

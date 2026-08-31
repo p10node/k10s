@@ -57,6 +57,9 @@ and **how little you have to remember**.
   so "why is this pod unhealthy?" means *this* pod.
 - **It updates itself.** `/update` installs the newest release over the
   running binary - checksum-verified, atomic, offers to restart into it.
+- **Your k9s-style command plugins fit.** Put scoped shortcuts in
+  `~/.k10s/plugins.yaml`; they appear beside built-in actions and receive the
+  selected object, namespace, context and column values.
 
 ## Try it in 30 seconds (no cluster required)
 
@@ -150,6 +153,11 @@ ClusterRoleBindings · Nodes · Namespaces · Events · CRDs · Custom Resources
 | `o` / `u`                          | cordon-uncordon / drain - offered only when Nodes is selected     |
 | `D` delete                         | red confirm modal, because it should be scary                     |
 
+Add your own scoped actions with the core k9s `plugins.yaml` format. They can
+run foreground or background commands, request confirmation, override a
+built-in shortcut deliberately, and are clickable in the same pane. See the
+[plugin guide and installable example](docs/plugins.md).
+
 ### Logs that follow, in the pane you were already looking at (`z` to zoom)
 
 ```
@@ -223,11 +231,11 @@ k10s is younger and deliberately narrower. The difference is philosophy:
 | Discovery     | you learn the commands                          | **the actions for the selected object are listed on screen** |
 | Search        | per-view filter, plus `:` to jump between views | **one box (`ctrl+p`) over kinds *and* objects**              |
 | AI            | plugin territory                                | **built in, with cluster context injected**                  |
-| Scope         | very large, plugin ecosystem                    | **small, opinionated, no plugins**                           |
+| Scope         | very large, plugin ecosystem                    | **small, opinionated, core command-plugin compatibility**   |
 | Upgrades      | your package manager                            | **`k10s update`, self-replacing**                            |
 
-**Use k9s if** you want the biggest feature surface, a plugin ecosystem, and
-years of production mileage. **Use k10s if** you want something you can hand
+**Use k9s if** you want the biggest feature surface, its full plugin ecosystem,
+and years of production mileage. **Use k10s if** you want something you can hand
 to a teammate who has never opened a TUI, and have them find `logs` on their
 own in ten seconds.
 

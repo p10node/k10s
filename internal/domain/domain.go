@@ -78,9 +78,13 @@ func (k Kind) Can(id string) bool {
 
 // ClusterInfo is the header's identity line.
 type ClusterInfo struct {
-	Context string
-	Server  string
-	Version string
+	Context    string
+	Cluster    string
+	User       string
+	Groups     string
+	Kubeconfig string
+	Server     string
+	Version    string
 }
 
 // NodeInfo is one row of the header's cluster-total gauges.

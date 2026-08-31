@@ -74,9 +74,13 @@ func (s *Source) RowCount(kind, ns string) int {
 
 func (s *Source) ClusterInfo() domain.ClusterInfo {
 	return domain.ClusterInfo{
-		Context: contexts[s.ctxIdx],
-		Server:  "https://k8s.example.com:6443",
-		Version: clusterVersion,
+		Context:    contexts[s.ctxIdx],
+		Cluster:    contexts[s.ctxIdx] + "-cluster",
+		User:       "demo-user",
+		Groups:     "demo-team",
+		Kubeconfig: "/mock/kubeconfig",
+		Server:     "https://k8s.example.com:6443",
+		Version:    clusterVersion,
 	}
 }
 
