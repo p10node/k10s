@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -884,12 +883,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionResultMsg:
 		m.busy = false
+		var resumeMouse tea.Cmd
+		if msg.resumeMouse {
+			resumeMouse = m.resumeMouseAfterExec()
+		}
 		if msg.err != nil {
 			m.toast = "✗ " + msg.err.Error()
 		} else {
 			m.toast = msg.toast
 		}
-		return m, nil
+		return m, resumeMouse
 
 	case updateCheckMsg:
 		return m, m.handleUpdateCheck(msg)
@@ -1025,30 +1028,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = "✗ " + msg.err.Error()
 			return m, nil
 		}
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
+		c, err := editorCommand(os.Getenv("EDITOR"), msg.path)
+		if err != nil {
+			return m, func() tea.Msg {
+				return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
+			}
 		}
-		c := exec.Command(editor, msg.path)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 		})
 
 	case editExitMsg:
+		// Bubble Tea releases the terminal while $EDITOR is running. Its
+		// RestoreTerminal path restores raw input and the alternate screen,
+		// but not mouse tracking, so explicitly put k10s's mouse mode back
+		// before handling the editor result. Respect copy mode: when the user
+		// deliberately disabled capture with ctrl+s, it must stay disabled.
+		resumeMouse := m.resumeMouseAfterExec()
 		defer os.Remove(msg.path)
 		if msg.err != nil {
 			m.toast = "✗ editor: " + msg.err.Error()
-			return m, nil
+			return m, resumeMouse
 		}
 		data, err := os.ReadFile(msg.path)
 		if err != nil {
 			m.toast = "✗ " + err.Error()
-			return m, nil
+			return m, resumeMouse
 		}
 		kind, ns, name := msg.kind, msg.ns, msg.name
-		return m, m.runAction("✓ "+name+" updated", func() error {
+		apply := m.runAction("✓ "+name+" updated", func() error {
 			return m.src.Apply(kind, ns, name, string(data))
 		})
+		return m, tea.Batch(resumeMouse, apply)
 
 	case portForwardMsg:
 		m.busy = false
@@ -1705,6 +1716,16 @@ func (m *Model) toggleMouse() tea.Cmd {
 	return tea.EnableMouseCellMotion
 }
 
+// resumeMouseAfterExec restores the capture mode that Bubble Tea turns off
+// while an external terminal process (such as $EDITOR) is running. Returning
+// nil in copy mode preserves the user's deliberate ctrl+s choice.
+func (m *Model) resumeMouseAfterExec() tea.Cmd {
+	if m.mouseOff {
+		return nil
+	}
+	return tea.EnableMouseCellMotion
+}
+
 // acceptSuggestion fills the prompt with a slash command. Commands that take
 // no argument are left ready to run; the rest get a trailing space so the
 // user can type the argument straight away.
@@ -2023,7 +2044,7 @@ func (m *Model) startShell(kind, ns, name string) tea.Cmd {
 		return nil
 	}
 	return tea.Exec(cmd, func(err error) tea.Msg {
-		return actionResultMsg{toast: "✓ shell session closed", err: err}
+		return actionResultMsg{toast: "✓ shell session closed", err: err, resumeMouse: true}
 	})
 }
 

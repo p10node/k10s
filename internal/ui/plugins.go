@@ -105,9 +105,21 @@ func (m *Model) runPlugin(item plugin.Named, vars plugin.Vars) tea.Cmd {
 
 	m.toast = "⟩ plugin " + label
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return actionResultMsg{err: fmt.Errorf("plugin %s: %w", item.Name, err)}
-		}
-		return actionResultMsg{toast: "✓ plugin " + label + " finished"}
+		return foregroundPluginResult(item, label, err)
 	})
+}
+
+// foregroundPluginResult marks the terminal handoff so Model.Update restores
+// Bubble Tea's mouse tracking after the child process exits.
+func foregroundPluginResult(item plugin.Named, label string, err error) actionResultMsg {
+	if err != nil {
+		return actionResultMsg{
+			err:         fmt.Errorf("plugin %s: %w", item.Name, err),
+			resumeMouse: true,
+		}
+	}
+	return actionResultMsg{
+		toast:       "✓ plugin " + label + " finished",
+		resumeMouse: true,
+	}
 }
