@@ -1035,20 +1035,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case editExitMsg:
+		// Bubble Tea releases the terminal while $EDITOR is running. Its
+		// RestoreTerminal path restores raw input and the alternate screen,
+		// but not mouse tracking, so explicitly put k10s's mouse mode back
+		// before handling the editor result. Respect copy mode: when the user
+		// deliberately disabled capture with ctrl+s, it must stay disabled.
+		resumeMouse := m.resumeMouseAfterExec()
 		defer os.Remove(msg.path)
 		if msg.err != nil {
 			m.toast = "✗ editor: " + msg.err.Error()
-			return m, nil
+			return m, resumeMouse
 		}
 		data, err := os.ReadFile(msg.path)
 		if err != nil {
 			m.toast = "✗ " + err.Error()
-			return m, nil
+			return m, resumeMouse
 		}
 		kind, ns, name := msg.kind, msg.ns, msg.name
-		return m, m.runAction("✓ "+name+" updated", func() error {
+		apply := m.runAction("✓ "+name+" updated", func() error {
 			return m.src.Apply(kind, ns, name, string(data))
 		})
+		return m, tea.Batch(resumeMouse, apply)
 
 	case portForwardMsg:
 		m.busy = false
@@ -1702,6 +1709,16 @@ func (m *Model) toggleMouse() tea.Cmd {
 		return tea.DisableMouse
 	}
 	m.toast = "mouse on — click rows, actions and buttons"
+	return tea.EnableMouseCellMotion
+}
+
+// resumeMouseAfterExec restores the capture mode that Bubble Tea turns off
+// while an external terminal process (such as $EDITOR) is running. Returning
+// nil in copy mode preserves the user's deliberate ctrl+s choice.
+func (m *Model) resumeMouseAfterExec() tea.Cmd {
+	if m.mouseOff {
+		return nil
+	}
 	return tea.EnableMouseCellMotion
 }
 
