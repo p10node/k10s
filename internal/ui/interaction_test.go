@@ -156,6 +156,42 @@ func TestTabNeverFocusesActionsPane(t *testing.T) {
 	}
 }
 
+func TestContextChooserBlocksEveryResourceActionHotkey(t *testing.T) {
+	for _, action := range Actions {
+		t.Run(action.ID, func(t *testing.T) {
+			m := newTestModel(t, mock.New(""))
+			dismissOnboarding(m)
+			m.showContextChooser()
+
+			cmd := m.handleKey(key(action.Key))
+			if cmd != nil {
+				t.Fatalf("%q returned a command while choosing a context", action.Key)
+			}
+			if m.confirm != nil {
+				t.Fatalf("%q opened a resource confirmation while choosing a context: %+v", action.Key, m.confirm)
+			}
+			if m.mode != modeContexts {
+				t.Fatalf("%q left the context chooser, mode = %v", action.Key, m.mode)
+			}
+		})
+	}
+}
+
+func TestContextChooserDoesNotRenderTheHiddenResourcesActions(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	hiddenName := m.curName()
+	m.showContextChooser()
+
+	view := m.viewActions(24, 20).String()
+	if strings.Contains(view, hiddenName) {
+		t.Fatalf("context chooser exposed the hidden resource %q in the Actions pane", hiddenName)
+	}
+	if !strings.Contains(view, "actions paused") {
+		t.Fatalf("context Actions pane did not explain that resource actions are paused:\n%s", view)
+	}
+}
+
 func TestSearchBoxTabReachesPrompt(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
 	dismissOnboarding(m)

@@ -11,6 +11,12 @@ import (
 
 // availablePlugins returns plugins whose k9s scope names the current kind.
 func (m *Model) availablePlugins() []plugin.Named {
+	// Context rows are not Kubernetes resources. Do not expose plugins for
+	// the resource table hidden underneath the chooser.
+	if m.mode == modeContexts {
+		return nil
+	}
+
 	kind := m.curKind()
 	aliases := aliasesFor(kind)
 	aliases = append(aliases, kind.Key, kind.Short, strings.ToLower(kind.Name))
@@ -66,6 +72,12 @@ func pluginLabel(item plugin.Named) string {
 }
 
 func (m *Model) firePlugin(item plugin.Named) tea.Cmd {
+	// Keep this guard even though availablePlugins hides plugins in context
+	// mode: it makes direct callers safe too.
+	if m.mode == modeContexts {
+		return nil
+	}
+
 	label := pluginLabel(item)
 	vars := m.pluginVars()
 	if item.Confirm {

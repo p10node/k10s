@@ -754,6 +754,15 @@ func (m *Model) viewActions(w, h int) Block {
 		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
 	}
 	inner := w - 2
+	if m.mode == modeContexts {
+		lines := []string{
+			s(th.Subtle).Render(" context picker"),
+			s(th.Border).Render(strings.Repeat("╌", inner)),
+			s(th.Subtle).Render(" actions paused"),
+			s(th.Accent).Render(" [enter] reconnect"),
+		}
+		return Panel(th, PanelOpts{Title: "Actions", Focused: false, W: w, H: h}, lines)
+	}
 	r := m.res()
 
 	// With no cluster there is no object under the cursor, so every action

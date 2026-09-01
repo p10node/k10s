@@ -77,6 +77,30 @@ func TestPluginOverrideCanReplaceFindShortcut(t *testing.T) {
 	}
 }
 
+func TestPluginShortcutsAreBlockedInContextChooser(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		t.Run(fmt.Sprintf("override=%v", override), func(t *testing.T) {
+			m := newTestModel(t, mock.New(""))
+			dismissOnboarding(m)
+			m.plugins = []plugin.Named{{Name: "context-danger", Plugin: plugin.Plugin{
+				ShortCut: "Ctrl-L", Description: "Hidden resource action", Scopes: []string{"all"},
+				Command: "printf", Confirm: true, Override: override,
+			}}}
+			m.showContextChooser()
+
+			if cmd := m.handleKey(ctrlL()); cmd != nil {
+				t.Fatal("plugin shortcut returned a command while choosing a context")
+			}
+			if m.confirm != nil {
+				t.Fatalf("plugin shortcut opened a confirmation while choosing a context: %+v", m.confirm)
+			}
+			if got := m.availablePlugins(); len(got) != 0 {
+				t.Fatalf("context chooser exposed plugins for its hidden resource: %+v", got)
+			}
+		})
+	}
+}
+
 func TestPluginShortcutsAreConsistentWhileSearchHasFocus(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

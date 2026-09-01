@@ -1899,6 +1899,14 @@ func (m *Model) selectResource(i int) {
 }
 
 func (m *Model) fireAction(a Action) tea.Cmd {
+	// The context chooser is a virtual table, not a Kubernetes resource
+	// view. curKind/curName still remember the table underneath it so the UI
+	// can return there after reconnecting, but acting on that hidden selection
+	// would be both surprising and dangerous (D could delete an unseen pod).
+	if m.mode == modeContexts {
+		return nil
+	}
+
 	r := m.curKind()
 	name := m.curName()
 	kind := r.Key
