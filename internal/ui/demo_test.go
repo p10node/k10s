@@ -129,6 +129,45 @@ func TestPickingARealContextLeavesTheDemo(t *testing.T) {
 	}
 }
 
+// The typed form must use the same context set as the chooser. The demo
+// backend only serves demo contexts itself, so validating against
+// m.src.Contexts() used to reject every real kubeconfig context even though
+// the chooser displayed and connected to it successfully.
+func TestDirectRealContextCommandLeavesTheDemo(t *testing.T) {
+	m, asked := demoModel(t)
+	m.Update(m.runSlash("/demo")())
+	if !m.demoMode() {
+		t.Fatal("precondition: not in the demo")
+	}
+
+	cmd := m.runSlash(":ctx kind-kind")
+	if cmd == nil {
+		t.Fatalf("direct real-context command did nothing; toast = %q", m.toast)
+	}
+	m.Update(cmd())
+
+	if m.demoMode() {
+		t.Error("still in the demo after a direct :ctx command")
+	}
+	if got := m.src.ClusterInfo().Context; got != "kind-kind" {
+		t.Errorf("landed on %q, want kind-kind", got)
+	}
+	if last := (*asked)[len(*asked)-1]; last != "kind-kind" {
+		t.Errorf("Connect was asked for %q, want kind-kind", last)
+	}
+}
+
+func TestDirectContextValidationIgnoresPickerFilter(t *testing.T) {
+	m, _ := demoModel(t)
+	m.Update(m.runSlash("/demo")())
+	m.ctxFilter = "does-not-match-kind"
+
+	cmd := m.runSlash(":ctx kind-kind")
+	if cmd == nil {
+		t.Fatalf("stale picker filter hid a valid direct context; toast = %q", m.toast)
+	}
+}
+
 // The demo is always offered, from anywhere: it needs no kubeconfig and
 // cannot fail, so there is no state in which it should be missing.
 func TestContextPickerAlwaysOffersTheDemo(t *testing.T) {

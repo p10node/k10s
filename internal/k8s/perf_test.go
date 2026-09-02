@@ -3,11 +3,13 @@ package k8s
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/p10node/k10s/internal/domain"
 )
@@ -168,10 +170,10 @@ func TestOpeningOneKindWatchesOnlyThatKind(t *testing.T) {
 	}
 }
 
-// TestCustomResourceCountMakesNoLiveCalls guards the worst offender found:
-// listing custom resources costs one API call per CRD, so it must happen on
-// a background sweep, never on the render path.
-func TestCustomResourceCountMakesNoLiveCalls(t *testing.T) {
+// TestCustomResourceCountDoesNotWaitForLiveCalls guards the worst offender
+// found: listing custom resources costs one API call per CRD, so a blocked
+// API call must remain in the background and never stall the render path.
+func TestCustomResourceCountDoesNotWaitForLiveCalls(t *testing.T) {
 	crd := &apiextv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "widgets.example.com"},
 		Spec: apiextv1.CustomResourceDefinitionSpec{
@@ -186,15 +188,35 @@ func TestCustomResourceCountMakesNoLiveCalls(t *testing.T) {
 	s := newTestStoreWithCRDs(t, []runtime.Object{crd})
 
 	dynFake := s.c.Dynamic.(*dynamicfake.FakeDynamicClient)
-	dynFake.ClearActions()
+	listStarted := make(chan struct{}, 1)
+	releaseList := make(chan struct{})
+	defer close(releaseList)
+	dynFake.PrependReactor("list", "widgets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		select {
+		case listStarted <- struct{}{}:
+		default:
+		}
+		<-releaseList
+		return false, nil, nil
+	})
 
-	for i := 0; i < 50; i++ {
-		s.RowCount("customresources", domain.AllNamespaces)
+	countsDone := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			s.RowCount("customresources", domain.AllNamespaces)
+		}
+		close(countsDone)
+	}()
+
+	select {
+	case <-countsDone:
+	case <-time.After(time.Second):
+		t.Fatal("RowCount(customresources) blocked on the live Custom Resource list")
 	}
-
-	for _, a := range dynFake.Actions() {
-		t.Errorf("RowCount(customresources) made a live %s call to %s — CR listing must stay off the render path",
-			a.GetVerb(), a.GetResource().Resource)
+	select {
+	case <-listStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Custom Resource background sweep never issued its live list")
 	}
 }
 

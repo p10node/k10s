@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -448,6 +449,51 @@ func TestLoadingKeepsSidebarCount(t *testing.T) {
 	list := m.viewList(24, 24).String()
 	if !strings.Contains(list, "7") {
 		t.Errorf("sidebar should keep showing the last known count while loading, got:\n%s", list)
+	}
+}
+
+type failedLoadingSource struct{ loadingSource }
+
+func (failedLoadingSource) LoadErrorFor(string, string) error {
+	return errors.New("pods is forbidden: cannot list resource pods at the cluster scope")
+}
+
+func TestLoadErrorReplacesIndefiniteSpinner(t *testing.T) {
+	m := newTestModel(t, failedLoadingSource{loadingSource{mock.New("")}})
+	dismissOnboarding(m)
+
+	body := strings.Join(m.tableBody(100, 14), "\n")
+	if !strings.Contains(body, "unable to load pods") || !strings.Contains(body, "forbidden") {
+		t.Fatalf("load failure is not explained in the table:\n%s", body)
+	}
+	if strings.Contains(body, "loading pods") {
+		t.Fatalf("failed initial list still renders an indefinite spinner:\n%s", body)
+	}
+	if strings.Contains(body, "no resources found") {
+		t.Fatalf("failed initial list is being reported as an empty result:\n%s", body)
+	}
+}
+
+type loadedEmptyScopedSource struct{ domain.Source }
+
+func (loadedEmptyScopedSource) Synced(string) bool            { return false }
+func (loadedEmptyScopedSource) SyncedFor(string, string) bool { return true }
+func (s loadedEmptyScopedSource) Rows(kind, ns string) ([]string, [][]string) {
+	cols, _ := s.Source.Rows(kind, ns)
+	return cols, nil
+}
+
+func TestScopedLoadedEmptyViewDoesNotRenderSpinner(t *testing.T) {
+	m := newTestModel(t, loadedEmptyScopedSource{mock.New("")})
+	dismissOnboarding(m)
+	m.jumpToResource("customresources")
+
+	body := strings.Join(m.tableBody(100, 12), "\n")
+	if strings.Contains(body, "loading custom resources") {
+		t.Fatalf("loaded empty custom-resource view still renders a spinner:\n%s", body)
+	}
+	if !strings.Contains(body, "no resources found") {
+		t.Fatalf("loaded empty custom-resource view has no stable empty state:\n%s", body)
 	}
 }
 

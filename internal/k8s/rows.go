@@ -109,30 +109,30 @@ func (s *Store) Rows(kind, ns string) ([]string, [][]string) {
 	}
 	switch kind {
 	case "pods":
-		return applyNamespace(k.Cols, s.podRows(), ns)
+		return applyNamespace(k.Cols, s.podRows(ns), ns)
 	case "deployments":
-		return applyNamespace(k.Cols, s.deployRows(), ns)
+		return applyNamespace(k.Cols, s.deployRows(ns), ns)
 	case "statefulsets":
-		return applyNamespace(k.Cols, s.stsRows(), ns)
+		return applyNamespace(k.Cols, s.stsRows(ns), ns)
 	case "daemonsets":
-		return applyNamespace(k.Cols, s.dsRows(), ns)
+		return applyNamespace(k.Cols, s.dsRows(ns), ns)
 	case "jobs":
-		return applyNamespace(k.Cols, s.jobRows(), ns)
+		return applyNamespace(k.Cols, s.jobRows(ns), ns)
 	case "cronjobs":
-		return applyNamespace(k.Cols, s.cronRows(), ns)
+		return applyNamespace(k.Cols, s.cronRows(ns), ns)
 	case "services":
-		return applyNamespace(k.Cols, s.svcRows(), ns)
+		return applyNamespace(k.Cols, s.svcRows(ns), ns)
 	case "ingresses":
-		return applyNamespace(k.Cols, s.ingRows(), ns)
+		return applyNamespace(k.Cols, s.ingRows(ns), ns)
 	case "configmaps":
-		return applyNamespace(k.Cols, s.cmRows(), ns)
+		return applyNamespace(k.Cols, s.cmRows(ns), ns)
 	case "secrets":
-		return applyNamespace(k.Cols, s.secretRows(), ns)
+		return applyNamespace(k.Cols, s.secretRows(ns), ns)
 	case "pvcs":
-		return applyNamespace(k.Cols, s.pvcRows(), ns)
+		return applyNamespace(k.Cols, s.pvcRows(ns), ns)
 	case "events":
 		// Newest-first, not alphabetical — see applyNamespaceOpt.
-		return applyNamespaceOpt(k.Cols, s.eventRows(), ns, false)
+		return applyNamespaceOpt(k.Cols, s.eventRows(ns), ns, false)
 	case "nodes":
 		return k.Cols, s.nodeTableRows()
 	case "namespaces":
@@ -142,25 +142,25 @@ func (s *Store) Rows(kind, ns string) ([]string, [][]string) {
 	case "customresources":
 		return applyNamespace(k.Cols, s.customResourceRows(), ns)
 	case "replicasets":
-		return applyNamespace(k.Cols, s.rsRows(), ns)
+		return applyNamespace(k.Cols, s.rsRows(ns), ns)
 	case "hpas":
-		return applyNamespace(k.Cols, s.hpaRows(), ns)
+		return applyNamespace(k.Cols, s.hpaRows(ns), ns)
 	case "endpoints":
-		return applyNamespace(k.Cols, s.endpointRows(), ns)
+		return applyNamespace(k.Cols, s.endpointRows(ns), ns)
 	case "networkpolicies":
-		return applyNamespace(k.Cols, s.netPolRows(), ns)
+		return applyNamespace(k.Cols, s.netPolRows(ns), ns)
 	case "resourcequotas":
-		return applyNamespace(k.Cols, s.quotaRows(), ns)
+		return applyNamespace(k.Cols, s.quotaRows(ns), ns)
 	case "limitranges":
-		return applyNamespace(k.Cols, s.limitRangeRows(), ns)
+		return applyNamespace(k.Cols, s.limitRangeRows(ns), ns)
 	case "pdbs":
-		return applyNamespace(k.Cols, s.pdbRows(), ns)
+		return applyNamespace(k.Cols, s.pdbRows(ns), ns)
 	case "serviceaccounts":
-		return applyNamespace(k.Cols, s.saRows(), ns)
+		return applyNamespace(k.Cols, s.saRows(ns), ns)
 	case "roles":
-		return applyNamespace(k.Cols, s.roleRows(), ns)
+		return applyNamespace(k.Cols, s.roleRows(ns), ns)
 	case "rolebindings":
-		return applyNamespace(k.Cols, s.roleBindingRows(), ns)
+		return applyNamespace(k.Cols, s.roleBindingRows(ns), ns)
 	case "pvs":
 		return k.Cols, s.pvRows()
 	case "storageclasses":
@@ -224,7 +224,7 @@ func (s *Store) RowCount(kind, ns string) int {
 	//     lister would truthfully report 0 and the sidebar badge would drop
 	//     to "0" for a second before snapping back to the real number.
 	// Showing the last known count through the load is far less jarring.
-	if !s.isStarted(kind) || !s.Synced(kind) {
+	if !s.isStarted(kind, ns) || !s.SyncedFor(kind, ns) {
 		s.noteInterest(kind, ns)
 		if n, ok := s.cachedCount(kind, ns); ok {
 			return n
@@ -234,40 +234,40 @@ func (s *Store) RowCount(kind, ns string) int {
 
 	switch kind {
 	case kPods:
-		items, _ := s.podLister().List(labels.Everything())
+		items, _ := s.podLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kDeployments:
-		items, _ := s.deployLister().List(labels.Everything())
+		items, _ := s.deployLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kStatefulSet:
-		items, _ := s.stsLister().List(labels.Everything())
+		items, _ := s.stsLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kDaemonSets:
-		items, _ := s.dsLister().List(labels.Everything())
+		items, _ := s.dsLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kJobs:
-		items, _ := s.jobLister().List(labels.Everything())
+		items, _ := s.jobLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kCronJobs:
-		items, _ := s.cronLister().List(labels.Everything())
+		items, _ := s.cronLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kServices:
-		items, _ := s.svcLister().List(labels.Everything())
+		items, _ := s.svcLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kIngresses:
-		items, _ := s.ingLister().List(labels.Everything())
+		items, _ := s.ingLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kConfigMaps:
-		items, _ := s.cmLister().List(labels.Everything())
+		items, _ := s.cmLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kSecrets:
-		items, _ := s.secretLister().List(labels.Everything())
+		items, _ := s.secretLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kPVCs:
-		items, _ := s.pvcLister().List(labels.Everything())
+		items, _ := s.pvcLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kEvents:
-		items, _ := s.eventLister().List(labels.Everything())
+		items, _ := s.eventLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kNodes:
 		items, _ := s.nodeLister().List(labels.Everything())
@@ -279,34 +279,34 @@ func (s *Store) RowCount(kind, ns string) int {
 		items, _ := s.crdLister().List(labels.Everything())
 		return len(items)
 	case kReplicaSets:
-		items, _ := s.rsLister().List(labels.Everything())
+		items, _ := s.rsLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kHPAs:
-		items, _ := s.hpaLister().List(labels.Everything())
+		items, _ := s.hpaLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kEndpoints:
-		items, _ := s.endpointsLister().List(labels.Everything())
+		items, _ := s.endpointsLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kNetPols:
-		items, _ := s.netPolLister().List(labels.Everything())
+		items, _ := s.netPolLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kQuotas:
-		items, _ := s.quotaLister().List(labels.Everything())
+		items, _ := s.quotaLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kLimitRanges:
-		items, _ := s.limitRangeLister().List(labels.Everything())
+		items, _ := s.limitRangeLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kPDBs:
-		items, _ := s.pdbLister().List(labels.Everything())
+		items, _ := s.pdbLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kSAs:
-		items, _ := s.saLister().List(labels.Everything())
+		items, _ := s.saLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kRoles:
-		items, _ := s.roleLister().List(labels.Everything())
+		items, _ := s.roleLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kRoleBinds:
-		items, _ := s.roleBindingLister().List(labels.Everything())
+		items, _ := s.roleBindingLister(ns).List(labels.Everything())
 		return countNS(items, ns)
 	case kPVs:
 		items, _ := s.pvLister().List(labels.Everything())
@@ -326,8 +326,8 @@ func (s *Store) RowCount(kind, ns string) int {
 
 // ---- pods -------------------------------------------------------------
 
-func (s *Store) podRows() []nsRow {
-	pods, _ := s.podLister().List(labels.Everything())
+func (s *Store) podRows(ns string) []nsRow {
+	pods, _ := s.podLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(pods))
 	for _, p := range pods {
 		ready, total := 0, len(p.Spec.Containers)
@@ -399,8 +399,8 @@ func firstImage(spec corev1.PodSpec) string {
 	return "-"
 }
 
-func (s *Store) deployRows() []nsRow {
-	items, _ := s.deployLister().List(labels.Everything())
+func (s *Store) deployRows(ns string) []nsRow {
+	items, _ := s.deployLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, d := range items {
 		desired := int32(1)
@@ -417,8 +417,8 @@ func (s *Store) deployRows() []nsRow {
 	return out
 }
 
-func (s *Store) stsRows() []nsRow {
-	items, _ := s.stsLister().List(labels.Everything())
+func (s *Store) stsRows(ns string) []nsRow {
+	items, _ := s.stsLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, d := range items {
 		desired := int32(1)
@@ -434,8 +434,8 @@ func (s *Store) stsRows() []nsRow {
 	return out
 }
 
-func (s *Store) dsRows() []nsRow {
-	items, _ := s.dsLister().List(labels.Everything())
+func (s *Store) dsRows(ns string) []nsRow {
+	items, _ := s.dsLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, d := range items {
 		row := []string{
@@ -449,8 +449,8 @@ func (s *Store) dsRows() []nsRow {
 
 // ---- jobs / cronjobs -----------------------------------------------------
 
-func (s *Store) jobRows() []nsRow {
-	items, _ := s.jobLister().List(labels.Everything())
+func (s *Store) jobRows(ns string) []nsRow {
+	items, _ := s.jobLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, j := range items {
 		completions := "1"
@@ -473,8 +473,8 @@ func (s *Store) jobRows() []nsRow {
 	return out
 }
 
-func (s *Store) cronRows() []nsRow {
-	items, _ := s.cronLister().List(labels.Everything())
+func (s *Store) cronRows(ns string) []nsRow {
+	items, _ := s.cronLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, c := range items {
 		suspend := c.Spec.Suspend != nil && *c.Spec.Suspend
@@ -492,8 +492,8 @@ func (s *Store) cronRows() []nsRow {
 
 // ---- services / ingresses -------------------------------------------------
 
-func (s *Store) svcRows() []nsRow {
-	items, _ := s.svcLister().List(labels.Everything())
+func (s *Store) svcRows(ns string) []nsRow {
+	items, _ := s.svcLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, svc := range items {
 		ports := make([]string, 0, len(svc.Spec.Ports))
@@ -514,8 +514,8 @@ func (s *Store) svcRows() []nsRow {
 	return out
 }
 
-func (s *Store) ingRows() []nsRow {
-	items, _ := s.ingLister().List(labels.Everything())
+func (s *Store) ingRows(ns string) []nsRow {
+	items, _ := s.ingLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, ing := range items {
 		class := "<none>"
@@ -552,8 +552,8 @@ func (s *Store) ingRows() []nsRow {
 
 // ---- configmaps / secrets / pvcs ------------------------------------------
 
-func (s *Store) cmRows() []nsRow {
-	items, _ := s.cmLister().List(labels.Everything())
+func (s *Store) cmRows(ns string) []nsRow {
+	items, _ := s.cmLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, cm := range items {
 		row := []string{cm.Name, strconv.Itoa(len(cm.Data) + len(cm.BinaryData)), age(cm.CreationTimestamp.Time)}
@@ -562,8 +562,8 @@ func (s *Store) cmRows() []nsRow {
 	return out
 }
 
-func (s *Store) secretRows() []nsRow {
-	items, _ := s.secretLister().List(labels.Everything())
+func (s *Store) secretRows(ns string) []nsRow {
+	items, _ := s.secretLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, sec := range items {
 		row := []string{sec.Name, string(sec.Type), strconv.Itoa(len(sec.Data)), age(sec.CreationTimestamp.Time)}
@@ -572,8 +572,8 @@ func (s *Store) secretRows() []nsRow {
 	return out
 }
 
-func (s *Store) pvcRows() []nsRow {
-	items, _ := s.pvcLister().List(labels.Everything())
+func (s *Store) pvcRows(ns string) []nsRow {
+	items, _ := s.pvcLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, pvc := range items {
 		cap := "-"
@@ -592,8 +592,8 @@ func (s *Store) pvcRows() []nsRow {
 
 // ---- events ----------------------------------------------------------------
 
-func (s *Store) eventRows() []nsRow {
-	items, _ := s.eventLister().List(labels.Everything())
+func (s *Store) eventRows(ns string) []nsRow {
+	items, _ := s.eventLister(ns).List(labels.Everything())
 	sort.Slice(items, func(i, j int) bool {
 		return eventTime(items[i]).After(eventTime(items[j]))
 	})
@@ -699,7 +699,7 @@ func (s *Store) nodeTableRows() [][]string {
 
 func (s *Store) namespaceRows() [][]string {
 	items, _ := s.nsLister().List(labels.Everything())
-	pods, _ := s.podLister().List(labels.Everything())
+	pods, _ := s.podLister(domain.AllNamespaces).List(labels.Everything())
 	out := make([][]string, 0, len(items))
 	for _, n := range items {
 		count := 0
@@ -769,25 +769,34 @@ func (s *Store) ensureCRRefresh() {
 }
 
 func (s *Store) refreshCRs() {
-	crds, _ := s.crdLister().List(labels.Everything())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// This is already a polling path. Read CRDs directly so an immediate
+	// first sweep cannot mistake an informer that has not synced yet for a
+	// genuinely empty CRD list and mark the view loaded too early.
+	crdList, err := s.apiext.ApiextensionsV1().CustomResourceDefinitions().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		s.crMu.Lock()
+		s.crErr = err
+		s.crMu.Unlock()
+		return
+	}
+
 	var out []nsRow
-	for _, crd := range crds {
+	var firstErr error
+	for i := range crdList.Items {
+		crd := &crdList.Items[i]
 		ver := servedStorageVersion(crd)
 		if ver == "" {
 			continue
 		}
 		gvr := schema.GroupVersionResource{Group: crd.Spec.Group, Version: ver, Resource: crd.Spec.Names.Plural}
-		var list *unstructured.UnstructuredList
-		var err error
-		if crd.Spec.Scope == apiextv1.NamespaceScoped {
-			list, err = s.c.Dynamic.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-		} else {
-			list, err = s.c.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
-		}
+		list, err := s.listCustomResources(ctx, gvr, crd.Spec.Scope == apiextv1.NamespaceScoped)
 		if err != nil || list == nil {
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		for _, item := range list.Items {
@@ -800,8 +809,25 @@ func (s *Store) refreshCRs() {
 	}
 
 	s.crMu.Lock()
-	s.crCache, s.crAt = out, time.Now()
+	s.crCache, s.crAt, s.crErr = out, time.Now(), firstErr
 	s.crMu.Unlock()
+}
+
+// listCustomResources isolates failures from runtime-discovered clients.
+// Real dynamic clients return an error for an unusable GVR; some fake or
+// third-party implementations panic when a List kind is missing. The sweep
+// runs in a background goroutine, where such a panic must not kill the TUI.
+func (s *Store) listCustomResources(ctx context.Context, gvr schema.GroupVersionResource, namespaced bool) (list *unstructured.UnstructuredList, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			list = nil
+			err = fmt.Errorf("list %s: %v", gvr.String(), recovered)
+		}
+	}()
+	if namespaced {
+		return s.c.Dynamic.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	}
+	return s.c.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
 }
 
 // crRows handles a directly-encoded "cr|group|version|resource|namespaced"
@@ -824,8 +850,8 @@ var (
 // the same way: read the (lazily started) lister, format, hand back nsRow so
 // applyNamespace can do the namespace filtering.
 
-func (s *Store) rsRows() []nsRow {
-	items, _ := s.rsLister().List(labels.Everything())
+func (s *Store) rsRows(ns string) []nsRow {
+	items, _ := s.rsLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, rs := range items {
 		desired := int32(0)
@@ -841,8 +867,8 @@ func (s *Store) rsRows() []nsRow {
 	return out
 }
 
-func (s *Store) hpaRows() []nsRow {
-	items, _ := s.hpaLister().List(labels.Everything())
+func (s *Store) hpaRows(ns string) []nsRow {
+	items, _ := s.hpaLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, h := range items {
 		min := "-"
@@ -968,8 +994,8 @@ func quantityOrUnknown(q *apiresource.Quantity) string {
 	return q.String()
 }
 
-func (s *Store) endpointRows() []nsRow {
-	items, _ := s.endpointsLister().List(labels.Everything())
+func (s *Store) endpointRows(ns string) []nsRow {
+	items, _ := s.endpointsLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, ep := range items {
 		var addrs []string
@@ -998,8 +1024,8 @@ func (s *Store) endpointRows() []nsRow {
 	return out
 }
 
-func (s *Store) netPolRows() []nsRow {
-	items, _ := s.netPolLister().List(labels.Everything())
+func (s *Store) netPolRows(ns string) []nsRow {
+	items, _ := s.netPolLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, np := range items {
 		out = append(out, nsRow{np.Namespace, []string{
@@ -1022,8 +1048,8 @@ func selectorString(sel *metav1.LabelSelector) string {
 	return s.String()
 }
 
-func (s *Store) quotaRows() []nsRow {
-	items, _ := s.quotaLister().List(labels.Everything())
+func (s *Store) quotaRows(ns string) []nsRow {
+	items, _ := s.quotaLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, q := range items {
 		out = append(out, nsRow{q.Namespace, []string{
@@ -1061,8 +1087,8 @@ func quotaUsage(q *corev1.ResourceQuota, prefix string) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Store) limitRangeRows() []nsRow {
-	items, _ := s.limitRangeLister().List(labels.Everything())
+func (s *Store) limitRangeRows(ns string) []nsRow {
+	items, _ := s.limitRangeLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, lr := range items {
 		types := make([]string, 0, len(lr.Spec.Limits))
@@ -1078,8 +1104,8 @@ func (s *Store) limitRangeRows() []nsRow {
 	return out
 }
 
-func (s *Store) pdbRows() []nsRow {
-	items, _ := s.pdbLister().List(labels.Everything())
+func (s *Store) pdbRows(ns string) []nsRow {
+	items, _ := s.pdbLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, p := range items {
 		minAvail, maxUnavail := "N/A", "N/A"
@@ -1099,8 +1125,8 @@ func (s *Store) pdbRows() []nsRow {
 
 // ---- RBAC ------------------------------------------------------------------
 
-func (s *Store) saRows() []nsRow {
-	items, _ := s.saLister().List(labels.Everything())
+func (s *Store) saRows(ns string) []nsRow {
+	items, _ := s.saLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, sa := range items {
 		out = append(out, nsRow{sa.Namespace, []string{
@@ -1110,8 +1136,8 @@ func (s *Store) saRows() []nsRow {
 	return out
 }
 
-func (s *Store) roleRows() []nsRow {
-	items, _ := s.roleLister().List(labels.Everything())
+func (s *Store) roleRows(ns string) []nsRow {
+	items, _ := s.roleLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, r := range items {
 		out = append(out, nsRow{r.Namespace, []string{
@@ -1121,8 +1147,8 @@ func (s *Store) roleRows() []nsRow {
 	return out
 }
 
-func (s *Store) roleBindingRows() []nsRow {
-	items, _ := s.roleBindingLister().List(labels.Everything())
+func (s *Store) roleBindingRows(ns string) []nsRow {
+	items, _ := s.roleBindingLister(ns).List(labels.Everything())
 	out := make([]nsRow, 0, len(items))
 	for _, rb := range items {
 		out = append(out, nsRow{rb.Namespace, []string{

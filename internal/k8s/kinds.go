@@ -6,6 +6,7 @@ var podActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.A
 var wlActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AScale, domain.AEdit, domain.ADelete}
 var basicActions = []string{domain.ADescribe, domain.AYAML, domain.AEdit, domain.ADelete}
 var nodeActions = []string{domain.ADescribe, domain.AYAML, domain.ATop, domain.ACordon, domain.ADrain, domain.AEdit}
+var daemonSetActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AEdit, domain.ADelete}
 
 // ReplicaSets scale and have logs like the workloads above, but nothing
 // patches a rollout restart onto them — that belongs to the Deployment.
@@ -23,7 +24,7 @@ var builtinKinds = []domain.Kind{
 	{Key: "statefulsets", Name: "StatefulSets", Short: "sts", Group: "Workloads", Namespaced: true,
 		Cols: []string{"NAME", "READY", "IMAGE", "AGE"}, Allowed: wlActions},
 	{Key: "daemonsets", Name: "DaemonSets", Short: "ds", Group: "Workloads", Namespaced: true,
-		Cols: []string{"NAME", "DESIRED", "READY", "AGE"}, Allowed: wlActions},
+		Cols: []string{"NAME", "DESIRED", "READY", "AGE"}, Allowed: daemonSetActions},
 	{Key: "jobs", Name: "Jobs", Short: "job", Group: "Workloads", Namespaced: true,
 		Cols: []string{"NAME", "COMPLETIONS", "DURATION", "AGE"}, Allowed: []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ADelete}},
 	{Key: "cronjobs", Name: "CronJobs", Short: "cj", Group: "Workloads", Namespaced: true,

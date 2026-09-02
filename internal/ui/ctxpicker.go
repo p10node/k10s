@@ -41,7 +41,11 @@ func (m *Model) showContextChooser() {
 // This is called on every render as well as from the key handler, so an
 // unstable order would mean the highlighted row moves under the cursor
 // between frames. Sorting here keeps that true whatever a backend returns.
-func (m *Model) ctxChoices() []string {
+// allContextChoices is the unfiltered source of truth for every way a
+// context can be selected. Keeping this separate from ctxChoices matters for
+// direct commands: the picker filter is transient UI state and must never
+// make a real kubeconfig context fail validation.
+func (m *Model) allContextChoices() []string {
 	seen := map[string]bool{}
 	all := make([]string, 0, len(m.kubeCtxs)+4)
 	add := func(names ...string) {
@@ -56,7 +60,11 @@ func (m *Model) ctxChoices() []string {
 	add(m.kubeCtxs...)
 	add(domain.DemoContext)
 	domain.SortNames(all)
+	return all
+}
 
+func (m *Model) ctxChoices() []string {
+	all := m.allContextChoices()
 	q := strings.ToLower(m.ctxFilter)
 	if q == "" {
 		return all

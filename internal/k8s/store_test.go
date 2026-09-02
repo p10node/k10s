@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -11,12 +12,16 @@ import (
 	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 
 	"github.com/p10node/k10s/internal/domain"
@@ -55,7 +60,23 @@ func newTestStore(t *testing.T, objs ...runtime.Object) *Store {
 func newTestStoreWithCRDs(t *testing.T, crds []runtime.Object, objs ...runtime.Object) *Store {
 	t.Helper()
 	cs := fake.NewSimpleClientset(objs...)
-	dyn := dynamicfake.NewSimpleDynamicClient(scheme.Scheme, objs...)
+	listKinds := map[schema.GroupVersionResource]string{}
+	for _, obj := range crds {
+		crd, ok := obj.(*apiextv1.CustomResourceDefinition)
+		if !ok {
+			continue
+		}
+		listKind := crd.Spec.Names.ListKind
+		if listKind == "" {
+			listKind = crd.Spec.Names.Kind + "List"
+		}
+		for _, version := range crd.Spec.Versions {
+			if version.Served {
+				listKinds[schema.GroupVersionResource{Group: crd.Spec.Group, Version: version.Name, Resource: crd.Spec.Names.Plural}] = listKind
+			}
+		}
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme.Scheme, listKinds, objs...)
 	apiext := apiextfake.NewSimpleClientset(crds...)
 	metrics := metricsfake.NewSimpleClientset()
 
@@ -87,6 +108,22 @@ func syncKinds(t *testing.T, s *Store, kinds ...string) {
 		for !s.Synced(k) {
 			if time.Now().After(deadline) {
 				t.Fatalf("informer for %q never synced", k)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func syncKindsFor(t *testing.T, s *Store, ns string, kinds ...string) {
+	t.Helper()
+	for _, k := range kinds {
+		s.ensure(k, ns)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for _, k := range kinds {
+		for !s.SyncedFor(k, ns) {
+			if time.Now().After(deadline) {
+				t.Fatalf("informer for %q in namespace %q never synced", k, ns)
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -164,6 +201,227 @@ func TestStoreRowsNamespaceFiltering(t *testing.T) {
 	_, rows = s.Rows("pods", "kube-system")
 	if len(rows) != 1 || rows[0][0] != "coredns-1" {
 		t.Fatalf("ns=kube-system: got %v, want exactly coredns-1", rows)
+	}
+}
+
+func TestNamespacedViewNeverStartsClusterWideInformer(t *testing.T) {
+	s := newTestStore(t,
+		pod("team-a", "allowed", "node-a", true),
+		pod("team-b", "hidden", "node-a", true),
+	)
+	cs := s.c.Clientset.(*fake.Clientset)
+
+	// Model the production RoleBinding: namespaced Pod LIST/WATCH is allowed,
+	// while the same request at cluster scope is forbidden.
+	cs.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == metav1.NamespaceAll {
+			return true, nil, errors.NewForbidden(corev1.Resource("pods"), "", nil)
+		}
+		return false, nil, nil
+	})
+	cs.PrependWatchReactor("pods", func(action clienttesting.Action) (bool, watch.Interface, error) {
+		if action.GetNamespace() == metav1.NamespaceAll {
+			return true, nil, errors.NewForbidden(corev1.Resource("pods"), "", nil)
+		}
+		return false, nil, nil
+	})
+
+	// Opening the view is what lazily starts the informer.
+	s.Rows(kPods, "team-a")
+	syncKindsFor(t, s, "team-a", kPods)
+	_, rows := s.Rows(kPods, "team-a")
+	if len(rows) != 1 || rows[0][0] != "allowed" {
+		t.Fatalf("namespace-scoped rows = %v, want only team-a/allowed", rows)
+	}
+
+	for _, action := range cs.Actions() {
+		if action.GetResource().Resource != "pods" {
+			continue
+		}
+		if action.GetVerb() == "list" || action.GetVerb() == "watch" {
+			if got := action.GetNamespace(); got != "team-a" {
+				t.Fatalf("%s pods used namespace %q, want team-a (cluster-wide request breaks RoleBinding users)", action.GetVerb(), got)
+			}
+		}
+	}
+}
+
+func TestNamespaceViewRecoversAfterForbiddenAllNamespacesAttempt(t *testing.T) {
+	s := newTestStore(t,
+		pod("team-a", "allowed", "node-a", true),
+		pod("team-b", "hidden", "node-a", true),
+	)
+	cs := s.c.Clientset.(*fake.Clientset)
+	cs.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == metav1.NamespaceAll {
+			return true, nil, errors.NewForbidden(corev1.Resource("pods"), "", nil)
+		}
+		return false, nil, nil
+	})
+
+	// First make the broad request fail, as if a RoleBinding-only user tried
+	// :ns all. Selecting their authorized namespace afterward must not reuse
+	// the permanently unsynced broad informer.
+	s.Rows(kPods, domain.AllNamespaces)
+	s.Rows(kPods, "team-a")
+	syncKindsFor(t, s, "team-a", kPods)
+	_, rows := s.Rows(kPods, "team-a")
+	if len(rows) != 1 || rows[0][0] != "allowed" {
+		t.Fatalf("namespace-scoped recovery rows = %v, want only team-a/allowed", rows)
+	}
+}
+
+func TestForbiddenAllNamespacesExposesLoadError(t *testing.T) {
+	s := newTestStore(t, pod("team-a", "allowed", "node-a", true))
+	cs := s.c.Clientset.(*fake.Clientset)
+	cs.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == metav1.NamespaceAll {
+			return true, nil, errors.NewForbidden(corev1.Resource("pods"), "", nil)
+		}
+		return false, nil, nil
+	})
+
+	s.Rows(kPods, domain.AllNamespaces)
+	deadline := time.Now().Add(5 * time.Second)
+	var loadErr error
+	for loadErr == nil && time.Now().Before(deadline) {
+		loadErr = s.LoadErrorFor(kPods, domain.AllNamespaces)
+		time.Sleep(5 * time.Millisecond)
+	}
+	if loadErr == nil {
+		t.Fatal("forbidden initial Pod list never became a visible load error")
+	}
+	if !errors.IsForbidden(loadErr) {
+		t.Fatalf("load error = %v, want Kubernetes Forbidden", loadErr)
+	}
+	if s.SyncedFor(kPods, domain.AllNamespaces) {
+		t.Fatal("forbidden all-namespaces informer unexpectedly reported synced")
+	}
+
+	// The error belongs only to the failed broad scope. Moving back to an
+	// authorized namespace must start clean and must not inherit it.
+	s.Rows(kPods, "team-a")
+	syncKindsFor(t, s, "team-a", kPods)
+	if err := s.LoadErrorFor(kPods, "team-a"); err != nil {
+		t.Fatalf("authorized namespace inherited broad-scope error: %v", err)
+	}
+}
+
+func TestNamespacesColdCacheReturnsFirstCommandTarget(t *testing.T) {
+	s := newTestStore(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}})
+	got := s.Namespaces()
+	if !slices.Contains(got, "team-a") {
+		t.Fatalf("first Namespaces call = %v, want team-a without a warm-up call", got)
+	}
+}
+
+func TestNamespacesIncludesKubeconfigNamespaceWhenNamespaceListIsForbidden(t *testing.T) {
+	s := newTestStore(t)
+	s.c.RawConfig = clientcmdapi.Config{Contexts: map[string]*clientcmdapi.Context{
+		"test-context": {Namespace: "team-a"},
+	}}
+	cs := s.c.Clientset.(*fake.Clientset)
+	cs.PrependReactor("list", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.NewForbidden(corev1.Resource("namespaces"), "", nil)
+	})
+
+	got := s.Namespaces()
+	if !slices.Contains(got, "team-a") {
+		t.Fatalf("Namespaces with cluster-scope RBAC denied = %v, want current kubeconfig namespace team-a", got)
+	}
+}
+
+func TestEmptyCustomResourcesBecomeLoaded(t *testing.T) {
+	s := newTestStore(t)
+	s.Rows("customresources", "default")
+	if s.SyncedFor("customresources", "default") {
+		t.Fatal("custom resources reported loaded before the first sweep completed")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.SyncedFor("customresources", "default") {
+		if time.Now().After(deadline) {
+			t.Fatal("successful empty custom-resource sweep never became loaded")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, rows := s.Rows("customresources", "default")
+	if len(rows) != 0 {
+		t.Fatalf("empty custom-resource cluster returned rows: %v", rows)
+	}
+}
+
+func TestForbiddenCustomResourceDiscoveryExposesLoadError(t *testing.T) {
+	s := newTestStore(t)
+	cs := s.apiext.(*apiextfake.Clientset)
+	cs.PrependReactor("list", "customresourcedefinitions", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.NewForbidden(
+			schema.GroupResource{Group: apiextv1.GroupName, Resource: "customresourcedefinitions"},
+			"",
+			nil,
+		)
+	})
+
+	s.Rows("customresources", "default")
+	deadline := time.Now().Add(5 * time.Second)
+	var loadErr error
+	for loadErr == nil && time.Now().Before(deadline) {
+		loadErr = s.LoadErrorFor("customresources", "default")
+		time.Sleep(5 * time.Millisecond)
+	}
+	if loadErr == nil {
+		t.Fatal("forbidden CRD discovery never became a visible load error")
+	}
+	if !errors.IsForbidden(loadErr) {
+		t.Fatalf("custom-resource load error = %v, want Kubernetes Forbidden", loadErr)
+	}
+	if s.SyncedFor("customresources", "default") {
+		t.Fatal("forbidden custom-resource discovery unexpectedly reported synced")
+	}
+}
+
+func TestDeletingLastCustomResourceLeavesLoadedEmptyView(t *testing.T) {
+	crd := &apiextv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "widgets.testing.k10s.io"},
+		Spec: apiextv1.CustomResourceDefinitionSpec{
+			Group:    "testing.k10s.io",
+			Names:    apiextv1.CustomResourceDefinitionNames{Plural: "widgets", Singular: "widget", Kind: "Widget", ListKind: "WidgetList"},
+			Scope:    apiextv1.NamespaceScoped,
+			Versions: []apiextv1.CustomResourceDefinitionVersion{{Name: "v1", Served: true, Storage: true}},
+		},
+	}
+	widget := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "testing.k10s.io/v1",
+		"kind":       "Widget",
+		"metadata": map[string]any{
+			"name": "only-widget", "namespace": "default",
+		},
+	}}
+	widget.SetGroupVersionKind(schema.GroupVersionKind{Group: "testing.k10s.io", Version: "v1", Kind: "Widget"})
+
+	s := newTestStoreWithCRDs(t, []runtime.Object{crd}, widget)
+	s.Rows("customresources", "default")
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.SyncedFor("customresources", "default") {
+		if time.Now().After(deadline) {
+			t.Fatal("initial custom-resource sweep never completed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, rows := s.Rows("customresources", "default")
+	if len(rows) != 1 || rows[0][0] != "only-widget" {
+		t.Fatalf("initial custom-resource rows = %v, want only-widget", rows)
+	}
+
+	if err := s.Delete("customresources", "default", "only-widget"); err != nil {
+		t.Fatalf("Delete custom resource: %v", err)
+	}
+	s.refreshCRs()
+	if !s.SyncedFor("customresources", "default") {
+		t.Fatal("custom-resource view returned to loading after a successful empty refresh")
+	}
+	_, rows = s.Rows("customresources", "default")
+	if len(rows) != 0 {
+		t.Fatalf("rows after deleting the last custom resource = %v, want loaded empty view", rows)
 	}
 }
 

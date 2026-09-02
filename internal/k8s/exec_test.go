@@ -2,11 +2,25 @@ package k8s
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 )
+
+func TestShellCommandProbesBashQuietly(t *testing.T) {
+	joined := strings.Join(shellCmd, " ")
+	if !strings.Contains(joined, "command -v bash") || !strings.Contains(joined, ">/dev/null 2>&1") {
+		t.Fatalf("shell command does not probe bash quietly: %q", joined)
+	}
+	if !strings.Contains(joined, "exec bash") || !strings.Contains(joined, "exec sh") {
+		t.Fatalf("shell command does not replace the wrapper with the selected shell: %q", joined)
+	}
+	if strings.Contains(joined, "(bash || sh)") {
+		t.Fatalf("shell command still emits the expected bash lookup failure: %q", joined)
+	}
+}
 
 // A TTY and a separate stderr stream are mutually exclusive: ask for both and
 // the SPDY transport upgrades the connection and then delivers nothing, so the

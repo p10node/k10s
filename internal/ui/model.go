@@ -811,10 +811,8 @@ func (m *Model) repaintTick() tea.Cmd {
 	if m.connecting {
 		return tickEvery(150 * time.Millisecond)
 	}
-	if sy, ok := m.src.(interface{ Synced(string) bool }); ok {
-		if !sy.Synced(m.curKind().Key) {
-			return tickEvery(150 * time.Millisecond)
-		}
+	if supported, synced := sourceSynced(m.src, m.curKind().Key, m.namespace); supported && !synced {
+		return tickEvery(150 * time.Millisecond)
 	}
 	return tick()
 }
@@ -2234,7 +2232,10 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 			m.showContextChooser()
 			return nil
 		}
-		if !slices.Contains(m.src.Contexts(), arg) {
+		// Validate against the same merged set the chooser displays. In Demo
+		// mode the current backend only knows demo contexts; kubeconfig's real
+		// contexts live in m.kubeCtxs and are how the user leaves the demo.
+		if !slices.Contains(m.allContextChoices(), arg) {
 			m.toast = "✗ no context named " + arg
 			return nil
 		}

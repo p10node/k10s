@@ -134,7 +134,7 @@ func (s *Store) cachedCount(kind, ns string) (int, bool) {
 // wantedKinds returns the kinds worth a request right now: asked for by the
 // sidebar recently, not already informer-backed, and not one the cluster has
 // refused lately.
-func (s *Store) wantedKinds() []domain.Kind {
+func (s *Store) wantedKinds(ns string) []domain.Kind {
 	now := time.Now()
 
 	s.cntMu.RLock()
@@ -156,7 +156,7 @@ func (s *Store) wantedKinds() []domain.Kind {
 			continue
 		}
 		// An open kind already has exact numbers from its cache.
-		if s.isStarted(k.Key) {
+		if s.isStarted(k.Key, ns) {
 			continue
 		}
 		if at, skip := gone[k.Key]; skip && now.Sub(at) < countGoneTTL {
@@ -186,7 +186,7 @@ func (s *Store) forgetStaleWants() {
 // the sweep turning into a thundering herd.
 func (s *Store) sweepCounts(ns string) {
 	s.forgetStaleWants()
-	kinds := s.wantedKinds()
+	kinds := s.wantedKinds(ns)
 	if len(kinds) == 0 {
 		return
 	}

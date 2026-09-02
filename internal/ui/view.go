@@ -728,7 +728,10 @@ func (m *Model) tableBody(inner, rows int) []string {
 		out = append(out, m.mark(fmt.Sprintf("row:%d", i), padBG(b.String(), inner, bg)))
 	}
 	if len(allRows) == 0 {
+		loadErr := m.kindLoadError()
 		switch {
+		case loadErr != nil:
+			out = append(out, m.loadErrorLines(inner, loadErr)...)
 		case m.kindLoading():
 			// Distinguish "still fetching" from "genuinely empty" — showing
 			// "no resources found" during the first list is a lie.
