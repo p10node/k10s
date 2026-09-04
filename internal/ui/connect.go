@@ -98,6 +98,7 @@ func (m *Model) handleConnected(msg srcConnectedMsg) tea.Cmd {
 	m.offline, m.offlineWhy = false, ""
 	old := m.src
 	m.src = msg.src
+	m.resetTrends()
 	if old != nil {
 		old.Close()
 	}

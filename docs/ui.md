@@ -38,7 +38,12 @@ Identity on the left, two buttons on the right:
 
 Row 3: cluster totals — CPU and MEM gauges (average of per-node usage from
 metrics-server). Per-node detail lives in Resources ▸ Nodes, not the banner.
-Gauges color by threshold: ok < 60% ≤ warn < 85% ≤ err.
+Gauges color by threshold: ok < 60% ≤ warn < 85% ≤ err. A trend arrow
+follows each percentage: red `▲` when usage just rose, green `▼` when it
+fell. It stays for about half a minute of unchanged readings (`trendTicks`
+in `trend.go`) and then clears. The same arrows sit at the end of the
+`CPU`/`MEM` cells in the Pods table and `CPU%`/`MEM%` in Nodes, tracked per
+row, so a pod that just spiked stands out without reading every number.
 
 ## Resources pane (left)
 
@@ -116,6 +121,8 @@ Two modes:
 - **Logs** — its own viewer; see below.
 
 `[ zoom ]` (or `z`) hides both side panes; `[ restore ]` / `z` / `esc` undoes.
+The choice is saved (`zoomed` in [config.md](config.md)), so a restart opens
+zoomed if you left it that way.
 
 ### Sort order
 

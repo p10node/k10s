@@ -123,6 +123,11 @@ type Model struct {
 	zoomed  bool
 	confirm *confirmState
 
+	// cpuTrend/memTrend follow the header gauges; trends follows the CPU and
+	// MEM cells of whichever table is showing. See trend.go.
+	cpuTrend, memTrend trend
+	trends             map[string]*trend
+
 	pmode promptMode
 	input textinput.Model
 	toast string
@@ -361,6 +366,7 @@ func (m *Model) loadConfig() {
 	} else {
 		m.collapsed = defaultCollapsed()
 	}
+	m.zoomed = c.Zoomed
 	m.applyUpdateConfig(c.Update)
 	m.onboarded = c.Onboarded
 	// First run opens straight into the cluster. A settings dialog in front
@@ -396,6 +402,7 @@ func (m *Model) saveConfig() error {
 		// Always written, even when nothing is folded — see config.Config.
 		Collapsed:    m.collapsedGroups(),
 		CollapsedSet: true,
+		Zoomed:       m.zoomed,
 		AI: config.AI{
 			Provider: providers[m.cfg.provider],
 			BaseURL:  m.cfg.url,
@@ -505,6 +512,16 @@ func (m *Model) toggleGroup(group string) {
 		m.toast = "▾ " + group
 	}
 	m.syncListScroll()
+	m.saveConfig()
+}
+
+// setZoomed shows or hides the side panes and remembers the choice, so the
+// layout comes back the same way after a restart.
+func (m *Model) setZoomed(on bool) {
+	if m.zoomed == on {
+		return
+	}
+	m.zoomed = on
 	m.saveConfig()
 }
 
@@ -930,6 +947,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.src.Close()
 		m.src = msg.src
+		m.resetTrends()
 		m.namespace = m.src.DefaultNamespace()
 		m.resIdx, m.search = 0, ""
 		m.rowIdx, m.rowScroll = 0, 0
@@ -1457,7 +1475,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.toast = "theme → " + m.th().Name
 		m.saveConfig()
 	case "z":
-		m.zoomed = !m.zoomed
+		m.setZoomed(!m.zoomed)
 		m.toast = map[bool]string{true: "zoomed", false: "restored"}[m.zoomed]
 	case "esc":
 		switch {
@@ -1468,7 +1486,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			m.mode = modeTable
 		case m.zoomed:
-			m.zoomed = false
+			m.setZoomed(false)
 		}
 	case "up":
 		m.move(-1)
@@ -1726,7 +1744,7 @@ func (m *Model) globalShortcut(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return m.toggleMouse(), true
 
 	case "ctrl+z":
-		m.zoomed = !m.zoomed
+		m.setZoomed(!m.zoomed)
 		return nil, true
 	case "pgup", "ctrl+b":
 		m.move(-m.visibleRows())
@@ -2551,7 +2569,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	if zone.Get("zoom").InBounds(msg) {
-		m.zoomed = !m.zoomed
+		m.setZoomed(!m.zoomed)
 		return nil
 	}
 	if zone.Get("close").InBounds(msg) {
@@ -2567,7 +2585,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 	if zone.Get("theme").InBounds(msg) {
 		// The same live-preview picker /theme opens — cycling blind through
-		// seven themes to find one was never the nice way to choose.
+		// eight themes to find one was never the nice way to choose.
 		m.openThemePicker()
 		return nil
 	}

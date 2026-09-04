@@ -24,6 +24,7 @@ cli: "k"
 clis: "kubectl,k8s,k"
 onboarded: true
 collapsed: "Config,Storage,RBAC"
+zoomed: false
 ai:
   provider: "anthropic"
   base_url: "https://api.anthropic.com/v1"
@@ -52,6 +53,10 @@ would fold the default groups (`Config`, `Storage`, `RBAC`) back over
 somebody who had just opened them. A file without the key at all still gets
 those defaults, which is what makes the first run after an upgrade sensible.
 
+`zoomed` records whether the main pane was zoomed (side panes hidden) so the
+layout comes back the same way on the next launch. A file without the key
+opens unzoomed.
+
 ## When it saves
 
 Every mutation that should survive a restart calls `Model.saveConfig()`
@@ -68,6 +73,7 @@ immediately — there's no explicit "save" step and no dirty-flag debounce:
 | `/settings` → Save                                          | `cli`                                                                        |
 | namespace picker (click `ns …` in the banner)               | `namespace`                                                                  |
 | folding a Resources group (`space`, `left`, click a header) | `collapsed`                                                                  |
+| zoom / restore the main pane (`z`, `ctrl+z`, `esc`, click `[ zoom ]`) | `zoomed`                                                           |
 | `/settings` → toggle the update check                       | `update.disabled`                                                            |
 | a successful update check (startup or `/update`)            | `update.last_check`                                                          |
 

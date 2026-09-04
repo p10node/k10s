@@ -154,10 +154,19 @@ func (m *Model) viewHeader(l layout) Block {
 	}
 	line0 += s(th.Bg).Render(spaces(gapw)) + right
 
+	// Both gauges carry a direction arrow after the percentage. Only real
+	// readings are tracked: with no nodes the totals are placeholders, and
+	// the first reading after a reconnect must not register as a jump.
+	if len(nodes) > 0 {
+		m.cpuTrend.observe(cpuPct, m.anim)
+		m.memTrend.observe(memPct, m.anim)
+	}
 	totals := s(th.Subtle).Bold(true).Render(" CPU  ") + gauge(th, cpuPct, 16) +
+		s(th.Bg).Render(" ") + trendGlyph(th, th.Bg, m.cpuTrend.arrow(m.anim)) +
 		s(th.Subtle).Render(fmt.Sprintf("  %.1f/%d cores", usedCores, nn*nodeCores)) +
 		s(th.Bg).Render("    ") +
 		s(th.Subtle).Bold(true).Render("MEM  ") + gauge(th, memPct, 16) +
+		s(th.Bg).Render(" ") + trendGlyph(th, th.Bg, m.memTrend.arrow(m.anim)) +
 		s(th.Subtle).Render(fmt.Sprintf("  %.0f/%d GiB", usedGiB, nn*nodeGiB))
 	// nn is clamped to 1 so the averages above cannot divide by zero, which
 	// with no nodes at all would print "0.0/16 cores" — a capacity figure for
@@ -661,7 +670,53 @@ func (m *Model) tableBody(inner, rows int) []string {
 	numW = clamp(numW, 2, 5)
 	gutter := numW + 3 // "▌" + space + digits + space
 
-	widths, keep := fitCols(cols, allRows, inner-gutter, gap)
+	// Usage columns get a trailing " ▲"/" ▼" (see trend.go). The arrow is
+	// laid out as part of the cell, so the column is sized with two extra
+	// cells and never jitters as arrows come and go.
+	nameIdx, nsIdx, hasMetric := -1, -1, false
+	metric := make([]bool, len(cols))
+	for ci, c := range cols {
+		switch {
+		case c == nameCol:
+			nameIdx = ci
+		case c == "NAMESPACE":
+			nsIdx = ci
+		case metricColumn(c):
+			metric[ci], hasMetric = true, true
+		}
+	}
+	sized := allRows
+	if hasMetric {
+		sized = make([][]string, len(allRows))
+		for i, row := range allRows {
+			r := append([]string(nil), row...)
+			for ci := range r {
+				if ci < len(metric) && metric[ci] {
+					r[ci] += "  "
+				}
+			}
+			sized[i] = r
+		}
+	}
+	widths, keep := fitCols(cols, sized, inner-gutter, gap)
+	arrowFor := func(row []string, ci int) int {
+		if nameIdx < 0 || nameIdx >= len(row) || ci >= len(row) || !metric[ci] {
+			return 0
+		}
+		v, ok := metricValue(row[ci])
+		if !ok {
+			return 0
+		}
+		ns := ""
+		if nsIdx >= 0 && nsIdx < len(row) {
+			ns = row[nsIdx]
+		} else {
+			ns = m.namespace
+		}
+		t := m.rowTrend(m.res().Key, ns, row[nameIdx], cols[ci])
+		t.observe(v, m.anim)
+		return t.arrow(m.anim)
+	}
 
 	var hdr strings.Builder
 	hdr.WriteString(s(th.Bg).Render(spaces(gutter)))
@@ -716,9 +771,16 @@ func (m *Model) tableBody(inner, rows int) []string {
 				col = th.Accent2
 			}
 			cell := fmt.Sprintf("%-*s", widths[k], trunc(v, widths[k]))
-			if ci < len(cols) && cols[ci] == nameCol && sel {
+			switch {
+			case ci < len(cols) && cols[ci] == nameCol && sel:
 				b.WriteString(st(col).Bold(true).Render(cell))
-			} else {
+			case ci < len(metric) && metric[ci] && widths[k] > 2:
+				// Value, then the arrow in the two reserved cells.
+				cell = fmt.Sprintf("%-*s", widths[k]-2, trunc(v, widths[k]-2))
+				b.WriteString(st(col).Render(cell))
+				b.WriteString(st(bg).Render(" "))
+				b.WriteString(trendGlyph(th, bg, arrowFor(row, ci)))
+			default:
 				b.WriteString(st(col).Render(cell))
 			}
 			if k < len(keep)-1 {

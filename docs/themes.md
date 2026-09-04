@@ -15,8 +15,9 @@ and `esc` restores whatever was active before you opened it.
 | 2 | `dracula`          |                  |
 | 3 | `nord`             |                  |
 | 4 | `gruvbox-dark`     |                  |
-| 5 | `solarized-light`  | light background |
-| 6 | `matrix`           | black + green    |
+| 5 | `solarized-dark`   |                  |
+| 6 | `solarized-light`  | light background |
+| 7 | `matrix`           | black + green    |
 
 ## Custom themes
 

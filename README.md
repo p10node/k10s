@@ -205,10 +205,10 @@ close. No cluster data leaves your machine unless you press enter in AI
 mode. The only other network call k10s makes on its own is the once-a-day
 update check, which asks GitHub for a version number and nothing else.
 
-### Seven built-in themes, plus your own — previewed live
+### Eight built-in themes, plus your own — previewed live
 
 `tokyo-night` (default) · `catppuccin-mocha` · `dracula` · `nord` ·
-`gruvbox-dark` · `solarized-light` · `matrix`
+`gruvbox-dark` · `solarized-dark` · `solarized-light` · `matrix`
 
 `T` cycles, `/theme` opens a picker that **applies each theme as you move
 through the list** - you judge it on the real UI, not on a name - and `esc`

@@ -54,8 +54,11 @@ type Config struct {
 	// groups somebody deliberately opened.
 	Collapsed    []string `yaml:"collapsed"`
 	CollapsedSet bool     `yaml:"-"`
-	AI           AI       `yaml:"ai"`
-	Update       Update   `yaml:"update"`
+	// Zoomed remembers whether the main pane was zoomed (side panes hidden)
+	// so a restart opens the way the user left it.
+	Zoomed bool   `yaml:"zoomed"`
+	AI     AI     `yaml:"ai"`
+	Update Update `yaml:"update"`
 }
 
 // DefaultCLI is the name used until /settings says otherwise.
@@ -127,6 +130,7 @@ func render(c Config) string {
 		collapsed = "-"
 	}
 	fmt.Fprintf(&b, "collapsed: %q\n", collapsed)
+	fmt.Fprintf(&b, "zoomed: %v\n", c.Zoomed)
 	b.WriteString("ai:\n")
 	fmt.Fprintf(&b, "  provider: %q\n", c.AI.Provider)
 	fmt.Fprintf(&b, "  base_url: %q\n", c.AI.BaseURL)
@@ -189,6 +193,8 @@ func parse(s string, c *Config) {
 					}
 				}
 			}
+		case !indented && key == "zoomed":
+			c.Zoomed = val == "true"
 		case indented && section == "ai":
 			switch key {
 			case "provider":

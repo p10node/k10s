@@ -189,6 +189,14 @@ var Themes = []Theme{
 		SelBg: c("#3c3836"), SelFg: c("#fbf1c7"),
 	},
 	{
+		Name: "solarized-dark",
+		Bg:   c("#002b36"), Fg: c("#93a1a1"), Subtle: c("#586e75"),
+		Border: c("#073642"), BorderOn: c("#268bd2"),
+		Accent: c("#268bd2"), Accent2: c("#6c71c4"),
+		Ok: c("#859900"), Warn: c("#b58900"), Err: c("#dc322f"),
+		SelBg: c("#073642"), SelFg: c("#eee8d5"),
+	},
+	{
 		Name: "solarized-light",
 		Bg:   c("#fdf6e3"), Fg: c("#073642"), Subtle: c("#93a1a1"),
 		Border: c("#d9d2bd"), BorderOn: c("#268bd2"),

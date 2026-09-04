@@ -32,6 +32,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Onboarded:    true,
 		Collapsed:    []string{"Config", "RBAC"},
 		CollapsedSet: true,
+		Zoomed:       true,
 		AI: AI{
 			Provider: "anthropic",
 			BaseURL:  "https://api.anthropic.com/v1",
