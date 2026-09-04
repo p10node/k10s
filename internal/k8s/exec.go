@@ -57,7 +57,9 @@ func ttyExecOptions(container string, cmd []string) *corev1.PodExecOptions {
 
 // shellCmd is what we run inside the pod: bash when the image has it, sh
 // otherwise, since a distroless-ish image usually has only the latter.
-var shellCmd = []string{"/bin/sh", "-c", "(bash || sh)"}
+// Probe quietly and replace the wrapper process with the selected shell so
+// Alpine-style images do not begin the session with "bash: not found".
+var shellCmd = []string{"/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh"}
 
 // execCommand implements tea.ExecCommand around client-go's remotecommand,
 // so Shell hands a real `kubectl exec -it`-equivalent session straight to

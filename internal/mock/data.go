@@ -39,6 +39,7 @@ var wlActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AR
 var basicActions = []string{domain.ADescribe, domain.AYAML, domain.AEdit, domain.ADelete}
 var nodeActions = []string{domain.ADescribe, domain.AYAML, domain.ATop, domain.ACordon, domain.ADrain, domain.AEdit}
 var rsActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AScale, domain.AEdit, domain.ADelete}
+var daemonSetActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AEdit, domain.ADelete}
 
 // clusterNodes are the fake cluster's nodes (header gauges + "nodes" kind).
 var clusterNodes = []node{
@@ -61,7 +62,7 @@ var contexts = []string{
 	domain.DemoContext + "-prod",
 }
 
-var resources = []resourceDef{
+var resourceFixtures = []resourceDef{
 	{
 		Kind: domain.Kind{Key: "pods", Name: "Pods", Short: "po", Group: "Workloads", Namespaced: true,
 			Cols: []string{"NAME", "READY", "STATUS", "RESTARTS", "CPU", "MEM", "NODE", "AGE"}, Allowed: podActions},
@@ -136,7 +137,7 @@ var resources = []resourceDef{
 	},
 	{
 		Kind: domain.Kind{Key: "daemonsets", Name: "DaemonSets", Short: "ds", Group: "Workloads", Namespaced: true,
-			Cols: []string{"NAME", "DESIRED", "READY", "AGE"}, Allowed: wlActions},
+			Cols: []string{"NAME", "DESIRED", "READY", "AGE"}, Allowed: daemonSetActions},
 		Rows: [][]string{
 			{"fluent-bit", "3", "3", "128d"},
 			{"node-exporter", "3", "3", "128d"},
@@ -420,13 +421,40 @@ var resources = []resourceDef{
 	},
 }
 
-func findResource(key string) *resourceDef {
+func findResource(resources []resourceDef, key string) *resourceDef {
 	for i := range resources {
 		if resources[i].Key == key {
 			return &resources[i]
 		}
 	}
 	return nil
+}
+
+func cloneRows(rows [][]string) [][]string {
+	out := make([][]string, len(rows))
+	for i := range rows {
+		out[i] = append([]string(nil), rows[i]...)
+	}
+	return out
+}
+
+// cloneResourceFixtures gives every demo Source a completely independent
+// dataset. Delete and Scale are real mutations in demo mode; pointing a new
+// Source at the package fixture would otherwise leak those changes into every
+// later source (and every later test) in the same process.
+func cloneResourceFixtures() []resourceDef {
+	out := make([]resourceDef, len(resourceFixtures))
+	for i, fixture := range resourceFixtures {
+		out[i] = fixture
+		out[i].Kind.Cols = append([]string(nil), fixture.Kind.Cols...)
+		out[i].Kind.Allowed = append([]string(nil), fixture.Kind.Allowed...)
+		out[i].Rows = cloneRows(fixture.Rows)
+		out[i].Extra = make([]nsRow, len(fixture.Extra))
+		for j, extra := range fixture.Extra {
+			out[i].Extra[j] = nsRow{NS: extra.NS, Row: append([]string(nil), extra.Row...)}
+		}
+	}
+	return out
 }
 
 // visible returns the columns and rows for r as seen under namespace ns.

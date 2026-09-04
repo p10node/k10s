@@ -6,7 +6,6 @@ import (
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -15,11 +14,15 @@ import (
 // so describe/YAML/delete can talk to the right GVR. It tries a live Get
 // per CRD — fine for the occasional single-item lookups this backs.
 func (s *Store) resolveCR(ns, name string) (gvr schema.GroupVersionResource, namespaced bool, actualNS string, crdKind string, found bool) {
-	crds, _ := s.crdLister().List(labels.Everything())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	crdList, err := s.apiext.ApiextensionsV1().CustomResourceDefinitions().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return schema.GroupVersionResource{}, false, "", "", false
+	}
 
-	for _, crd := range crds {
+	for i := range crdList.Items {
+		crd := &crdList.Items[i]
 		ver := servedStorageVersion(crd)
 		if ver == "" {
 			continue

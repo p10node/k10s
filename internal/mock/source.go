@@ -14,15 +14,21 @@ import (
 // Source is the offline demo backend: it implements domain.Source entirely
 // from the in-memory data in this package, no network calls.
 type Source struct {
-	mu       sync.Mutex
-	ctxIdx   int
-	cordoned map[string]bool
+	mu        sync.RWMutex
+	ctxIdx    int
+	cordoned  map[string]bool
+	resources []resourceDef
+	nodes     []node
 }
 
 // New returns a demo Source. ctx selects the starting context (by name or
 // substring match); empty picks the first one.
 func New(ctx string) *Source {
-	s := &Source{cordoned: map[string]bool{}}
+	s := &Source{
+		cordoned:  map[string]bool{},
+		resources: cloneResourceFixtures(),
+		nodes:     append([]node(nil), clusterNodes...),
+	}
 	if ctx != "" {
 		for i, c := range contexts {
 			if strings.Contains(c, ctx) {
@@ -35,9 +41,13 @@ func New(ctx string) *Source {
 }
 
 func (s *Source) Kinds() []domain.Kind {
-	out := make([]domain.Kind, len(resources))
-	for i, r := range resources {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.Kind, len(s.resources))
+	for i, r := range s.resources {
 		out[i] = r.Kind
+		out[i].Cols = append([]string(nil), r.Cols...)
+		out[i].Allowed = append([]string(nil), r.Allowed...)
 	}
 	return out
 }
@@ -45,8 +55,8 @@ func (s *Source) Kinds() []domain.Kind {
 func (s *Source) nodeRows() [][]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows := make([][]string, len(clusterNodes))
-	for i, n := range clusterNodes {
+	rows := make([][]string, len(s.nodes))
+	for i, n := range s.nodes {
 		status := n.Status
 		if s.cordoned[n.Name] {
 			status += ",SchedulingDisabled"
@@ -60,11 +70,14 @@ func (s *Source) Rows(kind, ns string) (cols []string, rows [][]string) {
 	if kind == "nodes" {
 		return []string{"NAME", "STATUS", "ROLES", "VERSION", "CPU%", "MEM%", "AGE"}, s.nodeRows()
 	}
-	r := findResource(kind)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r := findResource(s.resources, kind)
 	if r == nil {
 		return nil, nil
 	}
-	return visible(r, ns)
+	cols, rows = visible(r, ns)
+	return append([]string(nil), cols...), cloneRows(rows)
 }
 
 func (s *Source) RowCount(kind, ns string) int {
@@ -87,8 +100,8 @@ func (s *Source) ClusterInfo() domain.ClusterInfo {
 func (s *Source) Nodes() []domain.NodeInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]domain.NodeInfo, len(clusterNodes))
-	for i, n := range clusterNodes {
+	out := make([]domain.NodeInfo, len(s.nodes))
+	for i, n := range s.nodes {
 		out[i] = domain.NodeInfo{Name: n.Name, Status: n.Status, Role: n.Role, Ver: n.Ver, CPU: n.CPU, Mem: n.Mem, Age: n.Age}
 	}
 	return out
@@ -99,7 +112,9 @@ func (s *Source) DefaultNamespace() string { return "default" }
 func (s *Source) Contexts() []string { return append([]string(nil), contexts...) }
 
 func (s *Source) Namespaces() []string {
-	r := findResource("namespaces")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r := findResource(s.resources, "namespaces")
 	if r == nil {
 		return nil
 	}
@@ -143,7 +158,8 @@ func (s *Source) Describe(kind, ns, name string) (string, error) {
 }
 
 func (s *Source) YAML(kind, ns, name string) (string, error) {
-	r := findResource(kind)
+	s.mu.RLock()
+	r := findResource(s.resources, kind)
 	k := kind
 	if r != nil {
 		k = strings.TrimSuffix(r.Short, "s")
@@ -151,6 +167,7 @@ func (s *Source) YAML(kind, ns, name string) (string, error) {
 			k = kind
 		}
 	}
+	s.mu.RUnlock()
 	return yamlTpl(k, name), nil
 }
 
@@ -166,8 +183,11 @@ func (s *Source) Logs(kind, ns, name string) (string, error) {
 // entries as the viewer scrolls back so the paging path is exercisable
 // offline. It stops at demoLogDepth, which is where "more" turns false.
 func (s *Source) LogsTail(kind, ns, name string, n int) ([]string, bool, error) {
-	k := findResource(kind)
-	if k == nil || !k.Can(domain.ALogs) {
+	s.mu.RLock()
+	k := findResource(s.resources, kind)
+	canLogs := k != nil && k.Can(domain.ALogs)
+	s.mu.RUnlock()
+	if !canLogs {
 		return nil, false, domain.ErrNoLogs
 	}
 
@@ -199,16 +219,18 @@ func (s *Source) TopNode(name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var n *node
-	for i := range clusterNodes {
-		if clusterNodes[i].Name == name {
-			n = &clusterNodes[i]
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			n = &s.nodes[i]
 		}
 	}
 	return topNodeTpl(n, s.cordoned[name]), nil
 }
 
 func (s *Source) Delete(kind, ns, name string) error {
-	r := findResource(kind)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := findResource(s.resources, kind)
 	if r == nil {
 		return fmt.Errorf("unknown kind %q", kind)
 	}
@@ -240,7 +262,9 @@ func (s *Source) Delete(kind, ns, name string) error {
 func (s *Source) Restart(kind, ns, name string) error { return nil }
 
 func (s *Source) Scale(kind, ns, name string, replicas int) (int, error) {
-	r := findResource(kind)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := findResource(s.resources, kind)
 	if r == nil {
 		return 0, fmt.Errorf("unknown kind %q", kind)
 	}

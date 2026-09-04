@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
+	"k8s.io/kubectl/pkg/util"
 )
 
 // PortForward starts forwarding an ephemeral local port to the pod's first
@@ -66,7 +67,7 @@ func (s *Store) PortForward(kind, ns, name string) (string, func(), error) {
 func (s *Store) portForwardTarget(kind, ns, name string) (pod string, port int, err error) {
 	switch kind {
 	case "pods":
-		p, err := s.podLister().Pods(ns).Get(name)
+		p, err := s.podLister(ns).Pods(ns).Get(name)
 		if err != nil {
 			return "", 0, err
 		}
@@ -75,23 +76,27 @@ func (s *Store) portForwardTarget(kind, ns, name string) (pod string, port int, 
 		}
 		return p.Name, int(p.Spec.Containers[0].Ports[0].ContainerPort), nil
 	case "services":
-		svc, err := s.svcLister().Services(ns).Get(name)
+		svc, err := s.svcLister(ns).Services(ns).Get(name)
 		if err != nil {
 			return "", 0, err
 		}
 		if len(svc.Spec.Ports) == 0 {
 			return "", 0, fmt.Errorf("%s exposes no ports", name)
 		}
+		if len(svc.Spec.Selector) == 0 {
+			return "", 0, fmt.Errorf("service %s has no pod selector", name)
+		}
 		sel := labels.SelectorFromSet(labels.Set(svc.Spec.Selector))
-		pods, err := s.podLister().Pods(ns).List(sel)
+		pods, err := s.podLister(ns).Pods(ns).List(sel)
 		if err != nil || len(pods) == 0 {
 			return "", 0, fmt.Errorf("no backing pods found for service %s", name)
 		}
-		port := svc.Spec.Ports[0].TargetPort.IntValue()
-		if port == 0 {
-			port = int(svc.Spec.Ports[0].Port)
+		target := pods[0]
+		port, err := util.LookupContainerPortNumberByServicePort(*svc, *target, svc.Spec.Ports[0].Port)
+		if err != nil {
+			return "", 0, fmt.Errorf("resolve service %s port %d: %w", name, svc.Spec.Ports[0].Port, err)
 		}
-		return pods[0].Name, port, nil
+		return target.Name, int(port), nil
 	}
 	return "", 0, fmt.Errorf("port-forward is not supported for %s", kind)
 }

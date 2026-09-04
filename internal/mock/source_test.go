@@ -104,6 +104,34 @@ func TestSourceDelete(t *testing.T) {
 	}
 }
 
+func TestSourcesOwnIndependentResourceFixtures(t *testing.T) {
+	first := New("")
+	second := New("")
+
+	originalStatefulSets := second.RowCount("statefulsets", "default")
+	if err := first.Delete("statefulsets", "default", "cache-redis"); err != nil {
+		t.Fatalf("Delete(first): %v", err)
+	}
+	if got := second.RowCount("statefulsets", "default"); got != originalStatefulSets {
+		t.Fatalf("deleting from first source changed second source count to %d, want %d", got, originalStatefulSets)
+	}
+
+	if _, err := first.Scale("deployments", "default", "web-frontend", 9); err != nil {
+		t.Fatalf("Scale(first): %v", err)
+	}
+	_, rows := second.Rows("deployments", "default")
+	for _, row := range rows {
+		if row[0] == "web-frontend" && row[1] != "3/3" {
+			t.Fatalf("scaling first source leaked into second source: %v", row)
+		}
+	}
+
+	third := New("")
+	if got := third.RowCount("statefulsets", "default"); got != originalStatefulSets {
+		t.Fatalf("new source inherited a previous deletion: got %d, want %d", got, originalStatefulSets)
+	}
+}
+
 func TestSourceScale(t *testing.T) {
 	s := New("")
 	n, err := s.Scale("deployments", "", "web-frontend", 5)

@@ -18,6 +18,19 @@ import (
 	"github.com/p10node/k10s/internal/domain"
 )
 
+func TestDaemonSetsDoNotAdvertiseScale(t *testing.T) {
+	k := findKind(kDaemonSets)
+	if k == nil {
+		t.Fatal("DaemonSets kind is missing")
+	}
+	if k.Can(domain.AScale) {
+		t.Fatalf("DaemonSets advertise unsupported action %q: %v", domain.AScale, k.Allowed)
+	}
+	if !k.Can(domain.ARestart) {
+		t.Fatalf("DaemonSets lost supported restart action: %v", k.Allowed)
+	}
+}
+
 // fixtures is one object of every kind added for k9s parity, so each one can
 // be listed, counted and rendered the same way the older kinds are.
 func fixtures() []runtime.Object {

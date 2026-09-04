@@ -11,6 +11,7 @@ import (
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,15 +28,24 @@ type Store struct {
 	c *Client
 
 	kubeconfigPath string
-	factory        informers.SharedInformerFactory
-	apiext         apiextclientset.Interface
-	apiextFactory  apiextinformers.SharedInformerFactory
-	stop           chan struct{}
+	// factory is the cluster-wide factory used for cluster-scoped kinds and
+	// explicit all-namespaces views. namespacedFactories are created lazily
+	// for a selected namespace so a RoleBinding-only identity never needs a
+	// forbidden cluster-wide LIST/WATCH just to open its authorized namespace.
+	factory             informers.SharedInformerFactory
+	namespacedFactories map[string]informers.SharedInformerFactory
+	apiext              apiextclientset.Interface
+	apiextFactory       apiextinformers.SharedInformerFactory
+	stop                chan struct{}
 
 	// infMu guards started: which kinds have a running informer. Informers
 	// are started lazily, per kind, the first time that kind is displayed.
+	// loadErr retains the latest LIST/WATCH failure for an informer that has
+	// not completed its first list, so the UI can distinguish Forbidden from
+	// a request that is merely still in flight.
 	infMu   sync.Mutex
-	started map[string]bool
+	started map[informerKey]bool
+	loadErr map[informerKey]error
 
 	mu          sync.RWMutex
 	podMetrics  map[string]metricSample // "ns/name" -> cpu/mem
@@ -48,6 +58,7 @@ type Store struct {
 	crCache   []nsRow
 	crAt      time.Time
 	crRunning bool
+	crErr     error
 
 	// Sidebar badge counts for kinds whose informer isn't running, refreshed
 	// off-thread so the sidebar can show a number without opening a watch.
@@ -69,6 +80,11 @@ type Store struct {
 type metricSample struct {
 	cpuMilli int64
 	memBytes int64
+}
+
+type informerKey struct {
+	kind      string
+	namespace string // empty means cluster-wide/all namespaces
 }
 
 // NewStore builds a Store against the given kubeconfig path/context (both
@@ -99,17 +115,19 @@ func newStoreFrom(c *Client, apiext apiextclientset.Interface) (*Store, error) {
 		kubeconfigPath: c.ConfigPath,
 		// resync period 0: we never register event handlers, so periodic
 		// resyncs would be pure overhead. Freshness comes from the watch.
-		factory:       informers.NewSharedInformerFactory(c.Clientset, 0),
-		apiext:        apiext,
-		apiextFactory: apiextinformers.NewSharedInformerFactory(apiext, 0),
-		stop:          make(chan struct{}),
-		started:       map[string]bool{},
-		podMetrics:    map[string]metricSample{},
-		nodeMetrics:   map[string]metricSample{},
-		cnt:           map[string]int{},
-		cntKick:       make(chan struct{}, 1),
-		cntWant:       map[string]time.Time{},
-		cntGone:       map[string]time.Time{},
+		factory:             informers.NewSharedInformerFactory(c.Clientset, 0),
+		namespacedFactories: map[string]informers.SharedInformerFactory{},
+		apiext:              apiext,
+		apiextFactory:       apiextinformers.NewSharedInformerFactory(apiext, 0),
+		stop:                make(chan struct{}),
+		started:             map[informerKey]bool{},
+		loadErr:             map[informerKey]error{},
+		podMetrics:          map[string]metricSample{},
+		nodeMetrics:         map[string]metricSample{},
+		cnt:                 map[string]int{},
+		cntKick:             make(chan struct{}, 1),
+		cntWant:             map[string]time.Time{},
+		cntGone:             map[string]time.Time{},
 	}
 
 	// No informers are registered here and nothing is awaited: construction
@@ -159,109 +177,239 @@ const (
 // register wires up the informer for kind without starting it. Calling a
 // factory's typed accessor is what registers it; the factory caches by type,
 // so repeat calls are cheap and return the same shared informer.
-func (s *Store) register(kind string) cache.SharedIndexInformer {
+func register(factory informers.SharedInformerFactory, apiextFactory apiextinformers.SharedInformerFactory, kind string) cache.SharedIndexInformer {
 	switch kind {
 	case kPods:
-		return s.factory.Core().V1().Pods().Informer()
+		return factory.Core().V1().Pods().Informer()
 	case kDeployments:
-		return s.factory.Apps().V1().Deployments().Informer()
+		return factory.Apps().V1().Deployments().Informer()
 	case kStatefulSet:
-		return s.factory.Apps().V1().StatefulSets().Informer()
+		return factory.Apps().V1().StatefulSets().Informer()
 	case kDaemonSets:
-		return s.factory.Apps().V1().DaemonSets().Informer()
+		return factory.Apps().V1().DaemonSets().Informer()
 	case kJobs:
-		return s.factory.Batch().V1().Jobs().Informer()
+		return factory.Batch().V1().Jobs().Informer()
 	case kCronJobs:
-		return s.factory.Batch().V1().CronJobs().Informer()
+		return factory.Batch().V1().CronJobs().Informer()
 	case kServices:
-		return s.factory.Core().V1().Services().Informer()
+		return factory.Core().V1().Services().Informer()
 	case kIngresses:
-		return s.factory.Networking().V1().Ingresses().Informer()
+		return factory.Networking().V1().Ingresses().Informer()
 	case kConfigMaps:
-		return s.factory.Core().V1().ConfigMaps().Informer()
+		return factory.Core().V1().ConfigMaps().Informer()
 	case kSecrets:
-		return s.factory.Core().V1().Secrets().Informer()
+		return factory.Core().V1().Secrets().Informer()
 	case kPVCs:
-		return s.factory.Core().V1().PersistentVolumeClaims().Informer()
+		return factory.Core().V1().PersistentVolumeClaims().Informer()
 	case kNodes:
-		return s.factory.Core().V1().Nodes().Informer()
+		return factory.Core().V1().Nodes().Informer()
 	case kNamespaces:
-		return s.factory.Core().V1().Namespaces().Informer()
+		return factory.Core().V1().Namespaces().Informer()
 	case kEvents:
-		return s.factory.Core().V1().Events().Informer()
+		return factory.Core().V1().Events().Informer()
 	case kCRDs:
-		return s.apiextFactory.Apiextensions().V1().CustomResourceDefinitions().Informer()
+		return apiextFactory.Apiextensions().V1().CustomResourceDefinitions().Informer()
 	case kReplicaSets:
-		return s.factory.Apps().V1().ReplicaSets().Informer()
+		return factory.Apps().V1().ReplicaSets().Informer()
 	case kHPAs:
-		return s.factory.Autoscaling().V2().HorizontalPodAutoscalers().Informer()
+		return factory.Autoscaling().V2().HorizontalPodAutoscalers().Informer()
 	case kEndpoints:
-		return s.factory.Core().V1().Endpoints().Informer()
+		return factory.Core().V1().Endpoints().Informer()
 	case kNetPols:
-		return s.factory.Networking().V1().NetworkPolicies().Informer()
+		return factory.Networking().V1().NetworkPolicies().Informer()
 	case kQuotas:
-		return s.factory.Core().V1().ResourceQuotas().Informer()
+		return factory.Core().V1().ResourceQuotas().Informer()
 	case kLimitRanges:
-		return s.factory.Core().V1().LimitRanges().Informer()
+		return factory.Core().V1().LimitRanges().Informer()
 	case kPDBs:
-		return s.factory.Policy().V1().PodDisruptionBudgets().Informer()
+		return factory.Policy().V1().PodDisruptionBudgets().Informer()
 	case kPVs:
-		return s.factory.Core().V1().PersistentVolumes().Informer()
+		return factory.Core().V1().PersistentVolumes().Informer()
 	case kStorageCls:
-		return s.factory.Storage().V1().StorageClasses().Informer()
+		return factory.Storage().V1().StorageClasses().Informer()
 	case kSAs:
-		return s.factory.Core().V1().ServiceAccounts().Informer()
+		return factory.Core().V1().ServiceAccounts().Informer()
 	case kRoles:
-		return s.factory.Rbac().V1().Roles().Informer()
+		return factory.Rbac().V1().Roles().Informer()
 	case kRoleBinds:
-		return s.factory.Rbac().V1().RoleBindings().Informer()
+		return factory.Rbac().V1().RoleBindings().Informer()
 	case kClusterRole:
-		return s.factory.Rbac().V1().ClusterRoles().Informer()
+		return factory.Rbac().V1().ClusterRoles().Informer()
 	case kClusterBind:
-		return s.factory.Rbac().V1().ClusterRoleBindings().Informer()
+		return factory.Rbac().V1().ClusterRoleBindings().Informer()
 	}
 	return nil
+}
+
+// desiredInformerScope maps a view namespace to the namespace the API
+// LIST/WATCH should use. With no namespace argument, legacy internal callers
+// mean all namespaces; Rows always passes the actual view namespace.
+func (s *Store) desiredInformerScope(kind string, ns []string) string {
+	k := findKind(kind)
+	if k == nil || !k.Namespaced {
+		return metav1.NamespaceAll
+	}
+	if len(ns) == 0 || ns[0] == domain.AllNamespaces {
+		return metav1.NamespaceAll
+	}
+	return effectiveNS(ns[0])
+}
+
+// accessScopeLocked reuses an already-running all-namespaces cache when one
+// exists (important for admin sessions and existing tests), but never starts
+// that broader cache on behalf of a namespace-scoped view.
+func (s *Store) accessScopeLocked(kind, desired string) string {
+	if desired != metav1.NamespaceAll && s.started[informerKey{kind: kind, namespace: metav1.NamespaceAll}] {
+		// A started informer is not necessarily usable: RBAC-denied initial
+		// LISTs remain unsynced while client-go retries. Reuse only a cache
+		// that actually completed its initial list; otherwise allow the
+		// narrower, authorized namespace informer to start.
+		if inf := register(s.factory, s.apiextFactory, kind); inf != nil && inf.HasSynced() {
+			return metav1.NamespaceAll
+		}
+	}
+	return desired
+}
+
+func (s *Store) factoryLocked(namespace string) informers.SharedInformerFactory {
+	if namespace == metav1.NamespaceAll {
+		return s.factory
+	}
+	if factory := s.namespacedFactories[namespace]; factory != nil {
+		return factory
+	}
+	factory := informers.NewSharedInformerFactoryWithOptions(s.c.Clientset, 0, informers.WithNamespace(namespace))
+	s.namespacedFactories[namespace] = factory
+	return factory
 }
 
 // ensure starts the informer backing kind if it isn't running yet, and
 // returns immediately — it never waits for the cache to sync. Callers get
 // whatever is cached so far (possibly nothing on the first frame); the UI
 // polls and repaints as data arrives.
-func (s *Store) ensure(kind string) {
+func (s *Store) ensure(kind string, ns ...string) {
 	s.infMu.Lock()
 	defer s.infMu.Unlock()
-	if s.started[kind] {
+	desired := s.desiredInformerScope(kind, ns)
+	scope := s.accessScopeLocked(kind, desired)
+	key := informerKey{kind: kind, namespace: scope}
+	if s.started[key] {
 		return
 	}
-	if s.register(kind) == nil {
+	factory := s.factoryLocked(scope)
+	inf := register(factory, s.apiextFactory, kind)
+	if inf == nil {
 		return
 	}
-	s.started[kind] = true
+	// Reflector sends both initial LIST failures and later WATCH failures to
+	// this handler. It must be installed before Start; client-go rejects a
+	// handler change after the informer is running.
+	_ = inf.SetWatchErrorHandler(func(_ *cache.Reflector, err error) {
+		s.infMu.Lock()
+		s.loadErr[key] = err
+		s.infMu.Unlock()
+	})
+	s.started[key] = true
 	// Start is idempotent and launches only newly-registered informers.
 	if kind == kCRDs {
 		s.apiextFactory.Start(s.stop)
 	} else {
-		s.factory.Start(s.stop)
+		factory.Start(s.stop)
 	}
 }
 
 // isStarted reports whether kind's informer has been started, without
 // starting it. The sidebar uses this so drawing a badge never causes a new
 // cluster-wide watch for a kind the user hasn't opened.
-func (s *Store) isStarted(kind string) bool {
+func (s *Store) isStarted(kind string, ns ...string) bool {
 	s.infMu.Lock()
 	defer s.infMu.Unlock()
-	return s.started[kind]
+	desired := s.desiredInformerScope(kind, ns)
+	scope := s.accessScopeLocked(kind, desired)
+	return s.started[informerKey{kind: kind, namespace: scope}]
 }
 
 // Synced reports whether the informer for kind has finished its initial
 // list, so the UI can tell "no objects" apart from "still loading".
 func (s *Store) Synced(kind string) bool {
-	if !s.isStarted(kind) {
+	return s.SyncedFor(kind, domain.AllNamespaces)
+}
+
+// SyncedFor is the namespace-aware form used by the UI. Custom Resources
+// are polling-backed rather than informer-backed, so a completed sweep —
+// including a successful empty result — is their synchronization signal.
+func (s *Store) SyncedFor(kind, ns string) bool {
+	if kind == "customresources" {
+		s.crMu.Lock()
+		defer s.crMu.Unlock()
+		return !s.crAt.IsZero()
+	}
+
+	s.infMu.Lock()
+	defer s.infMu.Unlock()
+	desired := s.desiredInformerScope(kind, []string{ns})
+	scope := s.accessScopeLocked(kind, desired)
+	if !s.started[informerKey{kind: kind, namespace: scope}] {
 		return false
 	}
-	inf := s.register(kind)
-	return inf != nil && inf.HasSynced()
+	factory := s.factoryLocked(scope)
+	inf := register(factory, s.apiextFactory, kind)
+	synced := inf != nil && inf.HasSynced()
+	if synced {
+		// HasSynced means the informer recovered and completed an authoritative
+		// list. Do not leave an earlier transient error stuck on screen.
+		delete(s.loadErr, informerKey{kind: kind, namespace: scope})
+	}
+	return synced
+}
+
+// LoadErrorFor reports why the selected kind/scope has not completed its
+// first load. It is deliberately an optional Source capability: the in-memory
+// demo has no asynchronous list/watch and therefore no load error to expose.
+func (s *Store) LoadErrorFor(kind, ns string) error {
+	if kind == "customresources" {
+		s.crMu.Lock()
+		defer s.crMu.Unlock()
+		return s.crErr
+	}
+
+	s.infMu.Lock()
+	defer s.infMu.Unlock()
+	desired := s.desiredInformerScope(kind, []string{ns})
+	scope := s.accessScopeLocked(kind, desired)
+	key := informerKey{kind: kind, namespace: scope}
+	if !s.started[key] {
+		return nil
+	}
+	inf := register(s.factoryLocked(scope), s.apiextFactory, kind)
+	if inf != nil && inf.HasSynced() {
+		delete(s.loadErr, key)
+		return nil
+	}
+	return s.loadErr[key]
+}
+
+// factoryFor returns the informer factory serving kind in the requested
+// namespace, starting that scoped informer lazily if needed.
+func (s *Store) factoryFor(kind string, ns ...string) informers.SharedInformerFactory {
+	s.ensure(kind, ns...)
+	s.infMu.Lock()
+	defer s.infMu.Unlock()
+	desired := s.desiredInformerScope(kind, ns)
+	scope := s.accessScopeLocked(kind, desired)
+	return s.factoryLocked(scope)
+}
+
+func (s *Store) startedScopes(kind string) []string {
+	s.infMu.Lock()
+	defer s.infMu.Unlock()
+	var scopes []string
+	for key := range s.started {
+		if key.kind == kind {
+			scopes = append(scopes, key.namespace)
+		}
+	}
+	return scopes
 }
 
 func (s *Store) refreshMetricsLoop() {
@@ -285,8 +433,8 @@ func (s *Store) refreshMetrics() {
 	// Pod metrics are only rendered in the pods table, and the cluster-wide
 	// list is expensive — skip it entirely until pods have been opened.
 	pm := map[string]metricSample{}
-	if s.isStarted(kPods) {
-		if list, err := s.c.Metrics.MetricsV1beta1().PodMetricses(metav1.NamespaceAll).List(ctx, metav1.ListOptions{}); err == nil {
+	for _, namespace := range s.startedScopes(kPods) {
+		if list, err := s.c.Metrics.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{}); err == nil {
 			for _, m := range list.Items {
 				var cpu, mem int64
 				for _, cnt := range m.Containers {
@@ -374,9 +522,38 @@ func (s *Store) Contexts() []string { return s.c.Contexts() }
 // in arbitrary order, and anything the user scrolls must be stable.
 func (s *Store) Namespaces() []string {
 	nss, _ := s.nsLister().List(labels.Everything())
-	out := make([]string, 0, len(nss))
+	listForbidden := false
+
+	// The first command that mentions a namespace is often what starts the
+	// lazy namespace informer. A lister is necessarily empty on that exact
+	// call, so use one bounded direct LIST as the cold-cache fallback instead
+	// of misclassifying the namespace as row-filter text.
+	if !s.Synced(kNamespaces) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if list, err := s.c.Clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{}); err == nil {
+			nss = make([]*corev1.Namespace, len(list.Items))
+			for i := range list.Items {
+				nss[i] = &list.Items[i]
+			}
+		} else if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+			listForbidden = true
+		}
+		cancel()
+	}
+
+	out := make([]string, 0, len(nss)+1)
+	seen := make(map[string]bool, len(nss)+1)
 	for _, n := range nss {
-		out = append(out, n.Name)
+		if !seen[n.Name] {
+			out = append(out, n.Name)
+			seen[n.Name] = true
+		}
+	}
+	// A RoleBinding-only user may not list the cluster-scoped Namespace
+	// object, but the kubeconfig's current namespace is still valid and must
+	// be recognized by :kind <namespace>.
+	if current := s.DefaultNamespace(); listForbidden && current != "" && current != domain.AllNamespaces && !seen[current] {
+		out = append(out, current)
 	}
 	domain.SortNames(out)
 	return out

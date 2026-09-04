@@ -46,11 +46,8 @@ func (m *Model) closePalette() {
 // kindLoaded reports whether a kind's rows can be scanned without kicking
 // off new cluster traffic.
 func (m *Model) kindLoaded(key string) bool {
-	sy, ok := m.src.(interface{ Synced(string) bool })
-	if !ok {
-		return true // backends without lazy loading always have their data
-	}
-	return sy.Synced(key)
+	_, synced := sourceSynced(m.src, key, m.namespace)
+	return synced
 }
 
 // paletteHits returns what matches the current query.

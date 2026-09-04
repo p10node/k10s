@@ -16,7 +16,8 @@ import (
 )
 
 func (s *Store) podContainer(ns, name string) (string, error) {
-	p, err := s.podLister().Pods(effectiveNS(ns)).Get(name)
+	ens := effectiveNS(ns)
+	p, err := s.podLister(ens).Pods(ens).Get(name)
 	if err != nil {
 		return "", err
 	}
@@ -44,7 +45,7 @@ func (s *Store) logTarget(kind, ns, name string) (pod, container string, err err
 		if err != nil {
 			return "", "", err
 		}
-		pods, err := s.podLister().Pods(ens).List(sel)
+		pods, err := s.podLister(ens).Pods(ens).List(sel)
 		if err != nil || len(pods) == 0 {
 			return "", "", fmt.Errorf("no running pods found for %s/%s", kind, name)
 		}
@@ -72,31 +73,31 @@ func (s *Store) workloadSelector(kind, ns, name string) (labels.Selector, error)
 	var m *metav1.LabelSelector
 	switch kind {
 	case kDeployments:
-		d, err := s.deployLister().Deployments(ns).Get(name)
+		d, err := s.deployLister(ns).Deployments(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kStatefulSet:
-		d, err := s.stsLister().StatefulSets(ns).Get(name)
+		d, err := s.stsLister(ns).StatefulSets(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kDaemonSets:
-		d, err := s.dsLister().DaemonSets(ns).Get(name)
+		d, err := s.dsLister(ns).DaemonSets(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kJobs:
-		d, err := s.jobLister().Jobs(ns).Get(name)
+		d, err := s.jobLister(ns).Jobs(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kReplicaSets:
-		d, err := s.rsLister().ReplicaSets(ns).Get(name)
+		d, err := s.rsLister(ns).ReplicaSets(ns).Get(name)
 		if err != nil {
 			return nil, err
 		}

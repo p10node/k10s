@@ -20,59 +20,48 @@ import (
 // These never block: if the cache hasn't synced yet the lister simply
 // returns nothing, and the UI repaints when it fills in.
 
-func (s *Store) podLister() corelisters.PodLister {
-	s.ensure(kPods)
-	return s.factory.Core().V1().Pods().Lister()
+func (s *Store) podLister(ns ...string) corelisters.PodLister {
+	return s.factoryFor(kPods, ns...).Core().V1().Pods().Lister()
 }
 
-func (s *Store) deployLister() appslisters.DeploymentLister {
-	s.ensure(kDeployments)
-	return s.factory.Apps().V1().Deployments().Lister()
+func (s *Store) deployLister(ns ...string) appslisters.DeploymentLister {
+	return s.factoryFor(kDeployments, ns...).Apps().V1().Deployments().Lister()
 }
 
-func (s *Store) stsLister() appslisters.StatefulSetLister {
-	s.ensure(kStatefulSet)
-	return s.factory.Apps().V1().StatefulSets().Lister()
+func (s *Store) stsLister(ns ...string) appslisters.StatefulSetLister {
+	return s.factoryFor(kStatefulSet, ns...).Apps().V1().StatefulSets().Lister()
 }
 
-func (s *Store) dsLister() appslisters.DaemonSetLister {
-	s.ensure(kDaemonSets)
-	return s.factory.Apps().V1().DaemonSets().Lister()
+func (s *Store) dsLister(ns ...string) appslisters.DaemonSetLister {
+	return s.factoryFor(kDaemonSets, ns...).Apps().V1().DaemonSets().Lister()
 }
 
-func (s *Store) jobLister() batchlisters.JobLister {
-	s.ensure(kJobs)
-	return s.factory.Batch().V1().Jobs().Lister()
+func (s *Store) jobLister(ns ...string) batchlisters.JobLister {
+	return s.factoryFor(kJobs, ns...).Batch().V1().Jobs().Lister()
 }
 
-func (s *Store) cronLister() batchlisters.CronJobLister {
-	s.ensure(kCronJobs)
-	return s.factory.Batch().V1().CronJobs().Lister()
+func (s *Store) cronLister(ns ...string) batchlisters.CronJobLister {
+	return s.factoryFor(kCronJobs, ns...).Batch().V1().CronJobs().Lister()
 }
 
-func (s *Store) svcLister() corelisters.ServiceLister {
-	s.ensure(kServices)
-	return s.factory.Core().V1().Services().Lister()
+func (s *Store) svcLister(ns ...string) corelisters.ServiceLister {
+	return s.factoryFor(kServices, ns...).Core().V1().Services().Lister()
 }
 
-func (s *Store) ingLister() netlisters.IngressLister {
-	s.ensure(kIngresses)
-	return s.factory.Networking().V1().Ingresses().Lister()
+func (s *Store) ingLister(ns ...string) netlisters.IngressLister {
+	return s.factoryFor(kIngresses, ns...).Networking().V1().Ingresses().Lister()
 }
 
-func (s *Store) cmLister() corelisters.ConfigMapLister {
-	s.ensure(kConfigMaps)
-	return s.factory.Core().V1().ConfigMaps().Lister()
+func (s *Store) cmLister(ns ...string) corelisters.ConfigMapLister {
+	return s.factoryFor(kConfigMaps, ns...).Core().V1().ConfigMaps().Lister()
 }
 
-func (s *Store) secretLister() corelisters.SecretLister {
-	s.ensure(kSecrets)
-	return s.factory.Core().V1().Secrets().Lister()
+func (s *Store) secretLister(ns ...string) corelisters.SecretLister {
+	return s.factoryFor(kSecrets, ns...).Core().V1().Secrets().Lister()
 }
 
-func (s *Store) pvcLister() corelisters.PersistentVolumeClaimLister {
-	s.ensure(kPVCs)
-	return s.factory.Core().V1().PersistentVolumeClaims().Lister()
+func (s *Store) pvcLister(ns ...string) corelisters.PersistentVolumeClaimLister {
+	return s.factoryFor(kPVCs, ns...).Core().V1().PersistentVolumeClaims().Lister()
 }
 
 func (s *Store) nodeLister() corelisters.NodeLister {
@@ -85,9 +74,8 @@ func (s *Store) nsLister() corelisters.NamespaceLister {
 	return s.factory.Core().V1().Namespaces().Lister()
 }
 
-func (s *Store) eventLister() corelisters.EventLister {
-	s.ensure(kEvents)
-	return s.factory.Core().V1().Events().Lister()
+func (s *Store) eventLister(ns ...string) corelisters.EventLister {
+	return s.factoryFor(kEvents, ns...).Core().V1().Events().Lister()
 }
 
 func (s *Store) crdLister() apiextlisters.CustomResourceDefinitionLister {
@@ -97,39 +85,32 @@ func (s *Store) crdLister() apiextlisters.CustomResourceDefinitionLister {
 
 // ---- the kinds k9s reaches by :rs, :hpa, :sa, :pv … ------------------------
 
-func (s *Store) rsLister() appslisters.ReplicaSetLister {
-	s.ensure(kReplicaSets)
-	return s.factory.Apps().V1().ReplicaSets().Lister()
+func (s *Store) rsLister(ns ...string) appslisters.ReplicaSetLister {
+	return s.factoryFor(kReplicaSets, ns...).Apps().V1().ReplicaSets().Lister()
 }
 
-func (s *Store) hpaLister() autoscalinglisters.HorizontalPodAutoscalerLister {
-	s.ensure(kHPAs)
-	return s.factory.Autoscaling().V2().HorizontalPodAutoscalers().Lister()
+func (s *Store) hpaLister(ns ...string) autoscalinglisters.HorizontalPodAutoscalerLister {
+	return s.factoryFor(kHPAs, ns...).Autoscaling().V2().HorizontalPodAutoscalers().Lister()
 }
 
-func (s *Store) endpointsLister() corelisters.EndpointsLister {
-	s.ensure(kEndpoints)
-	return s.factory.Core().V1().Endpoints().Lister()
+func (s *Store) endpointsLister(ns ...string) corelisters.EndpointsLister {
+	return s.factoryFor(kEndpoints, ns...).Core().V1().Endpoints().Lister()
 }
 
-func (s *Store) netPolLister() netlisters.NetworkPolicyLister {
-	s.ensure(kNetPols)
-	return s.factory.Networking().V1().NetworkPolicies().Lister()
+func (s *Store) netPolLister(ns ...string) netlisters.NetworkPolicyLister {
+	return s.factoryFor(kNetPols, ns...).Networking().V1().NetworkPolicies().Lister()
 }
 
-func (s *Store) quotaLister() corelisters.ResourceQuotaLister {
-	s.ensure(kQuotas)
-	return s.factory.Core().V1().ResourceQuotas().Lister()
+func (s *Store) quotaLister(ns ...string) corelisters.ResourceQuotaLister {
+	return s.factoryFor(kQuotas, ns...).Core().V1().ResourceQuotas().Lister()
 }
 
-func (s *Store) limitRangeLister() corelisters.LimitRangeLister {
-	s.ensure(kLimitRanges)
-	return s.factory.Core().V1().LimitRanges().Lister()
+func (s *Store) limitRangeLister(ns ...string) corelisters.LimitRangeLister {
+	return s.factoryFor(kLimitRanges, ns...).Core().V1().LimitRanges().Lister()
 }
 
-func (s *Store) pdbLister() policylisters.PodDisruptionBudgetLister {
-	s.ensure(kPDBs)
-	return s.factory.Policy().V1().PodDisruptionBudgets().Lister()
+func (s *Store) pdbLister(ns ...string) policylisters.PodDisruptionBudgetLister {
+	return s.factoryFor(kPDBs, ns...).Policy().V1().PodDisruptionBudgets().Lister()
 }
 
 func (s *Store) pvLister() corelisters.PersistentVolumeLister {
@@ -142,19 +123,16 @@ func (s *Store) storageClassLister() storagelisters.StorageClassLister {
 	return s.factory.Storage().V1().StorageClasses().Lister()
 }
 
-func (s *Store) saLister() corelisters.ServiceAccountLister {
-	s.ensure(kSAs)
-	return s.factory.Core().V1().ServiceAccounts().Lister()
+func (s *Store) saLister(ns ...string) corelisters.ServiceAccountLister {
+	return s.factoryFor(kSAs, ns...).Core().V1().ServiceAccounts().Lister()
 }
 
-func (s *Store) roleLister() rbaclisters.RoleLister {
-	s.ensure(kRoles)
-	return s.factory.Rbac().V1().Roles().Lister()
+func (s *Store) roleLister(ns ...string) rbaclisters.RoleLister {
+	return s.factoryFor(kRoles, ns...).Rbac().V1().Roles().Lister()
 }
 
-func (s *Store) roleBindingLister() rbaclisters.RoleBindingLister {
-	s.ensure(kRoleBinds)
-	return s.factory.Rbac().V1().RoleBindings().Lister()
+func (s *Store) roleBindingLister(ns ...string) rbaclisters.RoleBindingLister {
+	return s.factoryFor(kRoleBinds, ns...).Rbac().V1().RoleBindings().Lister()
 }
 
 func (s *Store) clusterRoleLister() rbaclisters.ClusterRoleLister {

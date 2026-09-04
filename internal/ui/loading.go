@@ -5,18 +5,37 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/p10node/k10s/internal/domain"
 	"github.com/p10node/k10s/internal/theme"
 )
+
+func sourceSynced(src domain.Source, kind, namespace string) (supported, synced bool) {
+	if scoped, ok := src.(interface{ SyncedFor(string, string) bool }); ok {
+		return true, scoped.SyncedFor(kind, namespace)
+	}
+	if legacy, ok := src.(interface{ Synced(string) bool }); ok {
+		return true, legacy.Synced(kind)
+	}
+	return false, true
+}
+
+func sourceLoadError(src domain.Source, kind, namespace string) error {
+	if failed, ok := src.(interface{ LoadErrorFor(string, string) error }); ok {
+		return failed.LoadErrorFor(kind, namespace)
+	}
+	return nil
+}
 
 // kindLoading reports whether the pane is waiting on its first batch of data
 // for the current kind. Backends that can't report sync state (the offline
 // demo) always answer false — their data is there immediately.
 func (m *Model) kindLoading() bool {
-	sy, ok := m.src.(interface{ Synced(string) bool })
-	if !ok {
-		return false
-	}
-	return !sy.Synced(m.curKind().Key)
+	supported, synced := sourceSynced(m.src, m.curKind().Key, m.namespace)
+	return supported && !synced
+}
+
+func (m *Model) kindLoadError() error {
+	return sourceLoadError(m.src, m.curKind().Key, m.namespace)
 }
 
 // Braille spinner: smooth, single-cell, and present in the same fonts the
@@ -35,6 +54,27 @@ func (m *Model) loadingLines(inner int) []string {
 	return m.spinnerBlock(inner,
 		"loading "+strings.ToLower(m.curKind().Name)+"…",
 		"watch is being established · first list can take a moment")
+}
+
+// loadErrorLines is the terminal state for a first LIST/WATCH that failed.
+// Keeping the API error visible is especially important for RBAC: an
+// indefinite spinner suggests patience will help, while Forbidden requires a
+// different namespace or permission grant.
+func (m *Model) loadErrorLines(inner int, err error) []string {
+	th := m.th()
+	s := func(c lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
+	}
+	label := "unable to load " + strings.ToLower(m.curKind().Name)
+	lines := []string{"", s(th.Err).Bold(true).Render("   ✗ " + label), ""}
+	for _, line := range wrapLine(err.Error(), maxi(8, inner-6)) {
+		lines = append(lines, s(th.Fg).Render("   "+line))
+	}
+	lines = append(lines, "")
+	for _, line := range wrapLine("Check RBAC and the selected namespace; K10s will retry automatically.", maxi(8, inner-6)) {
+		lines = append(lines, s(th.Subtle).Render("   "+line))
+	}
+	return lines
 }
 
 // connectingLines renders the startup spinner, shown until the backend is

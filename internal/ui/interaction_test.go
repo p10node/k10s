@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -153,6 +154,42 @@ func TestTabNeverFocusesActionsPane(t *testing.T) {
 		if m.focus == focusActions {
 			t.Fatalf("tab #%d focused the actions pane", i+1)
 		}
+	}
+}
+
+func TestContextChooserBlocksEveryResourceActionHotkey(t *testing.T) {
+	for _, action := range Actions {
+		t.Run(action.ID, func(t *testing.T) {
+			m := newTestModel(t, mock.New(""))
+			dismissOnboarding(m)
+			m.showContextChooser()
+
+			cmd := m.handleKey(key(action.Key))
+			if cmd != nil {
+				t.Fatalf("%q returned a command while choosing a context", action.Key)
+			}
+			if m.confirm != nil {
+				t.Fatalf("%q opened a resource confirmation while choosing a context: %+v", action.Key, m.confirm)
+			}
+			if m.mode != modeContexts {
+				t.Fatalf("%q left the context chooser, mode = %v", action.Key, m.mode)
+			}
+		})
+	}
+}
+
+func TestContextChooserDoesNotRenderTheHiddenResourcesActions(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	hiddenName := m.curName()
+	m.showContextChooser()
+
+	view := m.viewActions(24, 20).String()
+	if strings.Contains(view, hiddenName) {
+		t.Fatalf("context chooser exposed the hidden resource %q in the Actions pane", hiddenName)
+	}
+	if !strings.Contains(view, "actions paused") {
+		t.Fatalf("context Actions pane did not explain that resource actions are paused:\n%s", view)
 	}
 }
 
@@ -412,6 +449,51 @@ func TestLoadingKeepsSidebarCount(t *testing.T) {
 	list := m.viewList(24, 24).String()
 	if !strings.Contains(list, "7") {
 		t.Errorf("sidebar should keep showing the last known count while loading, got:\n%s", list)
+	}
+}
+
+type failedLoadingSource struct{ loadingSource }
+
+func (failedLoadingSource) LoadErrorFor(string, string) error {
+	return errors.New("pods is forbidden: cannot list resource pods at the cluster scope")
+}
+
+func TestLoadErrorReplacesIndefiniteSpinner(t *testing.T) {
+	m := newTestModel(t, failedLoadingSource{loadingSource{mock.New("")}})
+	dismissOnboarding(m)
+
+	body := strings.Join(m.tableBody(100, 14), "\n")
+	if !strings.Contains(body, "unable to load pods") || !strings.Contains(body, "forbidden") {
+		t.Fatalf("load failure is not explained in the table:\n%s", body)
+	}
+	if strings.Contains(body, "loading pods") {
+		t.Fatalf("failed initial list still renders an indefinite spinner:\n%s", body)
+	}
+	if strings.Contains(body, "no resources found") {
+		t.Fatalf("failed initial list is being reported as an empty result:\n%s", body)
+	}
+}
+
+type loadedEmptyScopedSource struct{ domain.Source }
+
+func (loadedEmptyScopedSource) Synced(string) bool            { return false }
+func (loadedEmptyScopedSource) SyncedFor(string, string) bool { return true }
+func (s loadedEmptyScopedSource) Rows(kind, ns string) ([]string, [][]string) {
+	cols, _ := s.Source.Rows(kind, ns)
+	return cols, nil
+}
+
+func TestScopedLoadedEmptyViewDoesNotRenderSpinner(t *testing.T) {
+	m := newTestModel(t, loadedEmptyScopedSource{mock.New("")})
+	dismissOnboarding(m)
+	m.jumpToResource("customresources")
+
+	body := strings.Join(m.tableBody(100, 12), "\n")
+	if strings.Contains(body, "loading custom resources") {
+		t.Fatalf("loaded empty custom-resource view still renders a spinner:\n%s", body)
+	}
+	if !strings.Contains(body, "no resources found") {
+		t.Fatalf("loaded empty custom-resource view has no stable empty state:\n%s", body)
 	}
 }
 
