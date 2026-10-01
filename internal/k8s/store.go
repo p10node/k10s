@@ -27,7 +27,6 @@ import (
 type Store struct {
 	c *Client
 
-	kubeconfigPath string
 	// factory is the cluster-wide factory used for cluster-scoped kinds and
 	// explicit all-namespaces views. namespacedFactories are created lazily
 	// for a selected namespace so a RoleBinding-only identity never needs a
@@ -111,8 +110,7 @@ func newStoreFromClient(c *Client) (*Store, error) {
 // client from.
 func newStoreFrom(c *Client, apiext apiextclientset.Interface) (*Store, error) {
 	s := &Store{
-		c:              c,
-		kubeconfigPath: c.ConfigPath,
+		c: c,
 		// resync period 0: we never register event handlers, so periodic
 		// resyncs would be pure overhead. Freshness comes from the watch.
 		factory:             informers.NewSharedInformerFactory(c.Clientset, 0),
@@ -594,7 +592,8 @@ func (s *Store) SwitchContext(name string) (domain.Source, error) {
 			return nil, fmt.Errorf("no such context %q", name)
 		}
 	}
-	ns, err := NewStore(s.kubeconfigPath, target)
+	// Load the way this store's client did; see Client.loadPath.
+	ns, err := NewStore(s.c.loadPath, target)
 	if err != nil {
 		return nil, err
 	}

@@ -37,6 +37,13 @@ type Client struct {
 	Server         string
 	Version        string
 
+	// loadPath is the path New was given: "" for kubectl's own rules, where
+	// $KUBECONFIG may list several files, or one file named explicitly. A
+	// client for another context has to load the same way, and ConfigPath
+	// cannot stand in for it: it holds the list as plugins see it, and a
+	// list is not a file.
+	loadPath string
+
 	// versionErr is what the API server said — or failed to say — when New
 	// asked it for its version. It is the one request New makes, so it is
 	// also the only evidence we have that there is a cluster at the other
@@ -129,6 +136,7 @@ func New(path, context string) (*Client, error) {
 		Mapper:         mapper,
 		Metrics:        metrics,
 		ConfigPath:     loadedKubeconfigPath(path),
+		loadPath:       path,
 		RawConfig:      raw,
 		CurrentContext: cur,
 		Server:         restCfg.Host,
