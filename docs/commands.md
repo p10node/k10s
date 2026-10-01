@@ -235,9 +235,10 @@ can go before or after `demo`.
   cannot vouch for them.
 - The header says READ-ONLY for as long as the mode is on.
 - The same rule holds on the wire: every client k10s builds refuses, before
-  it leaves the machine, any request other than GET, HEAD or OPTIONS, and the
-  GETs that open exec, attach or port-forward streams. A code path the UI
-  missed still cannot write.
+  it leaves the machine, any request other than GET, HEAD or OPTIONS, the
+  GETs that open exec, attach or port-forward streams, and anything sent
+  through the proxy of a pod, a service or a node. A code path the UI missed
+  still cannot write.
 
 ## AI settings (`/settings`)
 

@@ -43,6 +43,21 @@ func TestCheckReadOnlyAllowsOnlyReads(t *testing.T) {
 		{"GET", "/api/v1/namespaces/default/pods/web/exec", false},
 		{"GET", "/api/v1/namespaces/default/pods/web/attach", false},
 		{"GET", "/api/v1/namespaces/default/pods/web/portforward", false},
+		// proxy hands the request to whatever listens behind a pod, a
+		// service or a node, where it is the kubelet.
+		{"GET", "/api/v1/namespaces/default/pods/web/proxy", false},
+		{"GET", "/api/v1/namespaces/default/pods/web:8080/proxy/admin/reset", false},
+		{"GET", "/api/v1/namespaces/default/services/http:web:80/proxy/", false},
+		{"HEAD", "/api/v1/nodes/node-1/proxy/healthz", false},
+		{"GET", "/api/v1/nodes/node-1/proxy/exec/default/web/app", false},
+		// An API server served under a path prefix, as some gateways do.
+		{"GET", "/k8s/clusters/c-1/api/v1/nodes/node-1/proxy/stats/summary", false},
+		{"GET", "/k8s/clusters/c-1/api/v1/namespaces/default/pods", true},
+		// Objects that are merely named "proxy" stay readable.
+		{"GET", "/api/v1/namespaces/default/pods/proxy", true},
+		{"GET", "/api/v1/namespaces/default/pods/proxy/log", true},
+		{"GET", "/api/v1/nodes/proxy", true},
+		{"GET", "/apis/metrics.k8s.io/v1beta1/nodes/proxy", true},
 	}
 	for _, c := range cases {
 		err := checkReadOnly(c.method, c.path)
@@ -134,6 +149,42 @@ func TestReadOnlyClientOpensNoExecOrPortForward(t *testing.T) {
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, pfURL)
 	if _, _, err := dialer.Dial("portforward.k8s.io"); err == nil || !strings.Contains(err.Error(), domain.ErrReadOnly.Error()) {
 		t.Errorf("port-forward: err = %v, want a read-only refusal", err)
+	}
+
+	if got := seen(); len(got) != 0 {
+		t.Errorf("requests that reached the API server = %v, want none", got)
+	}
+}
+
+// A GET through a proxy subresource reaches whatever listens behind it, so
+// it is not known to be a read; client-go's own proxy helpers have to be
+// stopped before they leave the machine.
+func TestReadOnlyClientProxiesNothing(t *testing.T) {
+	cfg, seen := recordingAPIServer(t)
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	proxies := map[string]func() error{
+		"pod": func() error {
+			_, err := cs.CoreV1().Pods("default").ProxyGet("http", "web", "8080", "admin/reset", nil).DoRaw(ctx)
+			return err
+		},
+		"service": func() error {
+			_, err := cs.CoreV1().Services("default").ProxyGet("http", "web", "80", "admin/reset", nil).DoRaw(ctx)
+			return err
+		},
+		"node": func() error {
+			return cs.CoreV1().RESTClient().Get().Resource("nodes").Name("node-1").
+				SubResource("proxy").Suffix("healthz").Do(ctx).Error()
+		},
+	}
+	for name, get := range proxies {
+		if err := get(); !errors.Is(err, domain.ErrReadOnly) {
+			t.Errorf("%s proxy: err = %v, want ErrReadOnly", name, err)
+		}
 	}
 
 	if got := seen(); len(got) != 0 {

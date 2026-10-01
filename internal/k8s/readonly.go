@@ -41,33 +41,53 @@ func (t readOnlyTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.next.RoundTrip(req)
 }
 
-// checkReadOnly allows GET, HEAD and OPTIONS, except where a GET opens a
+// checkReadOnly allows GET, HEAD and OPTIONS, except where one opens a
 // session: exec, attach and port-forward upgrade to a stream over GET when
-// they use WebSockets. Every other method can change something.
+// they use WebSockets, and proxy passes the request on to whatever listens
+// behind it. Every other method can change something.
 func checkReadOnly(method, path string) error {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		if sub := streamSubresource(path); sub != "" {
-			return fmt.Errorf("%w: pod %s is not allowed", domain.ErrReadOnly, sub)
+			return fmt.Errorf("%w: %s is not allowed", domain.ErrReadOnly, sub)
 		}
 		return nil
 	}
 	return fmt.Errorf("%w: %s %s is not allowed", domain.ErrReadOnly, method, path)
 }
 
-// streamSubresource returns "exec", "attach" or "portforward" when path is
-// that subresource of a pod, /api/v1/namespaces/<ns>/pods/<name>/<sub>, and
-// "" otherwise. Anchoring on "namespaces" keeps a pod that happens to be
-// named "exec" readable.
+// streamSubresource names the session a GET to path would open, such as
+// "pod exec" or "node proxy", and returns "" when path only reads:
+//
+//   - exec, attach and portforward of a pod,
+//     .../namespaces/<ns>/pods/<name>/<sub>;
+//   - proxy of a pod or a service, .../namespaces/<ns>/<kind>/<name>/proxy,
+//     or of a node, .../v1/nodes/<name>/proxy, followed by the path it
+//     forwards. Behind a node proxy is the kubelet, whose own API includes
+//     exec, so nothing sent through a proxy is known to only read.
+//
+// Anchoring on "namespaces", and on "v1" for nodes, which have none, keeps an
+// object that happens to be named "exec" or "proxy" readable.
 func streamSubresource(path string) string {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
 	n := len(segs)
-	if n < 5 || segs[n-5] != "namespaces" || segs[n-3] != "pods" {
-		return ""
+	if n >= 5 && segs[n-5] == "namespaces" && segs[n-3] == "pods" {
+		switch segs[n-1] {
+		case "exec", "attach", "portforward":
+			return "pod " + segs[n-1]
+		}
 	}
-	switch segs[n-1] {
-	case "exec", "attach", "portforward":
-		return segs[n-1]
+	// The forwarded path follows proxy, so it can sit anywhere.
+	for i := 3; i < n; i++ {
+		if segs[i] != "proxy" {
+			continue
+		}
+		switch kind := segs[i-2]; {
+		case (kind == "pods" || kind == "services") && i >= 4 && segs[i-4] == "namespaces":
+			return strings.TrimSuffix(kind, "s") + " proxy"
+		case kind == "nodes" && segs[i-3] == "v1":
+			return "node proxy"
+		}
 	}
 	return ""
 }
