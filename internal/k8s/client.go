@@ -13,6 +13,11 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	// A kubeconfig user can log in through an auth-provider stanza, and
+	// client-go only knows the providers a program imports. This is the set
+	// kubectl loads: oidc, plus stubs for the removed gcp and azure providers
+	// that say what replaced them.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
