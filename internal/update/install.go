@@ -69,12 +69,16 @@ func Apply(ctx context.Context, c *Client, rel *Release, progress Progress) (Res
 		return res, err
 	}
 	dlPath := dl.Name()
-	defer os.Remove(dlPath)
+	defer func() { _ = os.Remove(dlPath) }() // Best-effort temporary-file cleanup.
 
 	sum, err := download(ctx, c, rel.Asset, dl, progress)
-	dl.Close()
+	closeErr := dl.Close()
 	if err != nil {
 		return res, err
+	}
+
+	if closeErr != nil {
+		return res, closeErr
 	}
 
 	if err := verify(ctx, c, rel, sum); err != nil {
@@ -86,10 +90,10 @@ func Apply(ctx context.Context, c *Client, rel *Release, progress Progress) (Res
 		return res, err
 	}
 	binPath := bin.Name()
-	defer os.Remove(binPath)
+	defer func() { _ = os.Remove(binPath) }() // Normally already renamed into place.
 
 	if err := extract(dlPath, rel.Asset.Name, goos, bin); err != nil {
-		bin.Close()
+		_ = bin.Close() // Preserve the extraction error; discard the temporary binary.
 		return res, err
 	}
 	if err := bin.Close(); err != nil {
@@ -142,9 +146,12 @@ func checkWritable(dir string) error {
 		return fmt.Errorf("cannot write to %s — reinstall through your package manager, or re-run with sudo: %w", dir, err)
 	}
 	name := f.Name()
-	f.Close()
-	os.Remove(name)
-	return nil
+	closeErr := f.Close()
+	removeErr := os.Remove(name)
+	if closeErr != nil {
+		return closeErr
+	}
+	return removeErr
 }
 
 // download streams asset into w and returns its SHA-256.
@@ -160,7 +167,8 @@ func download(ctx context.Context, c *Client, asset Asset, w io.Writer, progress
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	// Reading determines success; closing the read-only body is best-effort cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("downloading %s: %s", asset.Name, resp.Status)
 	}
@@ -199,13 +207,11 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// verify checks the download against the release's checksum manifest. A
-// release without one installs unverified — noted in docs/update.md — but a
-// manifest that exists and disagrees, or that doesn't mention this asset at
-// all, stops the install.
+// verify requires a matching release checksum before installation. This
+// proves integrity against the manifest, not independent publisher identity.
 func verify(ctx context.Context, c *Client, rel *Release, sum string) error {
 	if rel.Sums.URL == "" {
-		return nil
+		return fmt.Errorf("release %s has no checksum manifest — refusing to install unverified", rel.Tag)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rel.Sums.URL, nil)
 	if err != nil {
@@ -216,17 +222,21 @@ func verify(ctx context.Context, c *Client, rel *Release, sum string) error {
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", rel.Sums.Name, err)
 	}
-	defer resp.Body.Close()
+	// Reading determines success; closing the read-only body is best-effort cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetching %s: %s", rel.Sums.Name, resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil {
 		return err
 	}
+	if len(body) > 1<<20 {
+		return fmt.Errorf("checksum manifest exceeds 1 MiB limit")
+	}
 	want, ok := findSum(string(body), rel.Asset.Name)
 	if !ok {
-		return fmt.Errorf("%s does not list %s — refusing to install unverified", rel.Sums.Name, rel.Asset.Name)
+		return fmt.Errorf("%s is malformed or does not list %s — refusing to install unverified", rel.Sums.Name, rel.Asset.Name)
 	}
 	if !strings.EqualFold(want, sum) {
 		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", rel.Asset.Name, want, sum)
@@ -238,17 +248,30 @@ func verify(ctx context.Context, c *Client, rel *Release, sum string) error {
 // where the name may carry a "*" binary marker or a directory prefix.
 func findSum(manifest, asset string) (string, bool) {
 	sc := bufio.NewScanner(strings.NewReader(manifest))
+	var sum string
+	seen := make(map[string]bool)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 {
+		if len(fields) == 0 {
 			continue
 		}
-		name := strings.TrimPrefix(fields[len(fields)-1], "*")
-		if path.Base(name) == asset {
-			return fields[0], true
+		if len(fields) != 2 {
+			return "", false
+		}
+		digest, err := hex.DecodeString(fields[0])
+		if err != nil || len(digest) != sha256.Size {
+			return "", false
+		}
+		name := path.Base(strings.TrimPrefix(fields[1], "*"))
+		if seen[name] {
+			return "", false
+		}
+		seen[name] = true
+		if name == asset {
+			sum = fields[0]
 		}
 	}
-	return "", false
+	return sum, sc.Err() == nil && sum != ""
 }
 
 // BinaryName is the file to look for inside a release archive.
@@ -272,7 +295,7 @@ func extract(archivePath, assetName, goos string, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }() // Read-only cleanup; reads report data/integrity errors.
 		_, err = io.Copy(w, f)
 		return err
 	}
@@ -326,30 +349,35 @@ func findTarEntry(archivePath, want string) (string, error) {
 	return biggest, nil
 }
 
-// walkTarGz calls fn for each entry until fn reports it is done.
+// walkTarGz calls fn until done, then validates the rest of the archive.
 func walkTarGz(archivePath string, fn func(*tar.Header, io.Reader) (bool, error)) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Read-only cleanup; reads report data/integrity errors.
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("not a gzip archive: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }() // Read-only cleanup; reads report data/integrity errors.
 	tr := tar.NewReader(gz)
+	var done bool
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
-			return nil
+			// tar EOF precedes the gzip trailer; Close alone never verifies CRC.
+			_, err = io.Copy(io.Discard, gz)
+			return err
 		}
 		if err != nil {
 			return err
 		}
-		done, err := fn(h, tr)
-		if err != nil || done {
-			return err
+		if !done {
+			done, err = fn(h, tr)
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -361,7 +389,7 @@ func extractZip(archivePath, want string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("not a zip archive: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }() // Read-only cleanup; reads report data/integrity errors.
 
 	var target, biggest *zip.File
 	for _, f := range zr.File {
@@ -386,7 +414,7 @@ func extractZip(archivePath, want string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }() // Read-only cleanup; reads report data/integrity errors.
 	_, err = io.Copy(w, io.LimitReader(rc, maxDownload))
 	return err
 }
@@ -399,7 +427,7 @@ func sanityCheck(binPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Read-only cleanup; reads report data/integrity errors.
 	fi, err := f.Stat()
 	if err != nil {
 		return err
@@ -447,12 +475,16 @@ func replaceExecutable(newPath, exe string) (string, error) {
 		return "", os.Rename(newPath, exe)
 	}
 	backup := exe + ".old"
-	os.Remove(backup)
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("removing previous backup: %w", err)
+	}
 	if err := os.Rename(exe, backup); err != nil {
 		return "", fmt.Errorf("moving the running binary aside: %w", err)
 	}
 	if err := os.Rename(newPath, exe); err != nil {
-		os.Rename(backup, exe) // put the working binary back
+		if restoreErr := os.Rename(backup, exe); restoreErr != nil {
+			return backup, fmt.Errorf("replacing executable: %w; restoring backup %s: %v", err, backup, restoreErr)
+		}
 		return "", err
 	}
 	// Expected to fail while the old image is still mapped; the next update

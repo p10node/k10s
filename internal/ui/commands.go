@@ -201,7 +201,7 @@ func aliasReport(kinds []domain.Kind) string {
 	b.WriteString("k10s — \":\" commands\n\n  RESOURCE VIEWS\n")
 	for _, k := range kinds {
 		names := ":" + strings.Join(aliasesFor(k), "  :")
-		b.WriteString(fmt.Sprintf("    %-46s %s\n", names, k.Name))
+		fmt.Fprintf(&b, "    %-46s %s\n", names, k.Name)
 	}
 	b.WriteString(`
   ARGUMENT (optional, on any of the above)
@@ -219,7 +219,7 @@ func aliasReport(kinds []domain.Kind) string {
 		if c.Args != "" {
 			names += " " + c.Args
 		}
-		b.WriteString(fmt.Sprintf("    %-46s %s\n", names, c.Desc))
+		fmt.Fprintf(&b, "    %-46s %s\n", names, c.Desc)
 	}
 	return b.String()
 }

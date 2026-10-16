@@ -21,9 +21,10 @@ func bigCluster(t *testing.T, nPods int) *Store {
 	objs := make([]runtime.Object, 0, nPods+1)
 	for i := 0; i < nPods; i++ {
 		ns := "default"
-		if i%3 == 1 {
+		switch i % 3 {
+		case 1:
 			ns = "kube-system"
-		} else if i%3 == 2 {
+		case 2:
 			ns = "monitoring"
 		}
 		objs = append(objs, pod(ns, fmt.Sprintf("workload-%04d", i), "node-a", true))

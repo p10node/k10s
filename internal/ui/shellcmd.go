@@ -53,6 +53,8 @@ func (m *Model) runShellCmd(line string) tea.Cmd {
 		m.toast = "✗ read-only mode: shell commands are off"
 		return nil
 	}
+	m.backToTable()
+	session, view := m.connGen, m.viewGen
 	title := "$ " + line
 	m.startBusy(trunc(title, 48))
 	m.toast = "… " + trunc(title, 48)
@@ -75,7 +77,7 @@ func (m *Model) runShellCmd(line string) tea.Cmd {
 		case body == "":
 			body = "(no output)"
 		}
-		return textResultMsg{title: title, body: body}
+		return textResultMsg{session: session, view: view, title: title, body: body}
 	}
 }
 

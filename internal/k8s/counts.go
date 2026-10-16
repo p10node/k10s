@@ -79,7 +79,7 @@ func (s *Store) noteInterest(kind, ns string) {
 	// prometheus-operator. It starts only when that kind is on screen, not
 	// merely because the sidebar was drawn.
 	if kind == "customresources" {
-		s.ensureCRRefresh()
+		s.ensureCRRefresh(ns)
 	}
 
 	if !already {
@@ -159,7 +159,7 @@ func (s *Store) wantedKinds(ns string) []domain.Kind {
 		if s.isStarted(k.Key, ns) {
 			continue
 		}
-		if at, skip := gone[k.Key]; skip && now.Sub(at) < countGoneTTL {
+		if at, skip := gone[countRefusalKey(k, ns)]; skip && now.Sub(at) < countGoneTTL {
 			continue
 		}
 		out = append(out, k)
@@ -209,11 +209,11 @@ func (s *Store) sweepCounts(ns string) {
 	for i, k := range kinds {
 		if results[i] >= 0 {
 			s.cnt[countKey(k.Key, ns)] = results[i]
-			delete(s.cntGone, k.Key)
+			delete(s.cntGone, countRefusalKey(k, ns))
 			continue
 		}
 		if unavailable[i] {
-			s.cntGone[k.Key] = now
+			s.cntGone[countRefusalKey(k, ns)] = now
 		}
 	}
 	s.cntMu.Unlock()
@@ -286,7 +286,7 @@ func (s *Store) countKindUnsafe(k domain.Kind, ns string) (int, bool) {
 		// Counting these means one request per CRD; the background CR sweep
 		// already produces the number when the view is opened.
 		s.crMu.Lock()
-		cached, have := s.crCache, !s.crAt.IsZero()
+		cached, have := s.crCache, s.crNS == ns && !s.crAt.IsZero()
 		s.crMu.Unlock()
 		if !have {
 			return domain.CountUnknown, false
@@ -334,4 +334,13 @@ func (s *Store) countKindUnsafe(k domain.Kind, ns string) (int, bool) {
 		}
 	}
 	return items + int(remaining), false
+}
+
+// Builtin kind keys uniquely identify a resource. Cluster-scoped refusals are
+// shared; namespace RBAC refusals must not suppress an authorized namespace.
+func countRefusalKey(k domain.Kind, ns string) string {
+	if !k.Namespaced || ns == domain.AllNamespaces {
+		return countKey(k.Key, "")
+	}
+	return countKey(k.Key, effectiveNS(ns))
 }

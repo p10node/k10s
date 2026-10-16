@@ -110,13 +110,19 @@ func serveRelease(t *testing.T, r *release) *Client {
 		if r.sums != "" {
 			assets = append(assets, map[string]any{"name": "checksums.txt", "browser_download_url": r.srv.URL + "/dl/checksums.txt"})
 		}
-		json.NewEncoder(w).Encode(map[string]any{"tag_name": r.tag, "assets": assets})
+		if err := json.NewEncoder(w).Encode(map[string]any{"tag_name": r.tag, "assets": assets}); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	})
 	mux.HandleFunc("/dl/"+r.assetName, func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(r.assetBody)
+		if _, err := w.Write(r.assetBody); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	})
 	mux.HandleFunc("/dl/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, r.sums)
+		if _, err := fmt.Fprint(w, r.sums); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	})
 	r.srv = httptest.NewUnstartedServer(mux)
 	r.srv.Start()
@@ -191,9 +197,128 @@ func TestApplyInstallsTheNewBinaryOverTheOldOne(t *testing.T) {
 	}
 }
 
+func TestApplyRequiresChecksumManifest(t *testing.T) {
+	body := tarGz(t, map[string][]byte{"k10s": fakeBinary("NEW")})
+	r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_linux_amd64.tar.gz", assetBody: body}
+	c := serveRelease(t, r)
+	c.GOOS, c.GOARCH = "linux", "amd64"
+	target := installTarget(t, c)
+	rel, err := c.Latest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(context.Background(), c, rel, nil); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Errorf("expected checksum refusal, got %v", err)
+	}
+	assertOldInstall(t, target)
+}
+
+func assertOldInstall(t *testing.T, target string) {
+	t.Helper()
+	got, err := os.ReadFile(target)
+	if err != nil || !bytes.Equal(got, fakeBinary("OLD")) {
+		t.Errorf("old executable changed: %v", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
+		t.Errorf("old mode changed: %v", info.Mode())
+	}
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil || len(entries) != 1 {
+		t.Errorf("temporary files leaked: %v, %v", entries, err)
+	}
+}
+
+func TestApplyRejectsMalformedChecksumManifest(t *testing.T) {
+	body := tarGz(t, map[string][]byte{"k10s": fakeBinary("NEW")})
+	name := "k10s_2.0.0_linux_amd64.tar.gz"
+	for _, manifest := range []string{
+		sum256(body) + "  " + name + "\nmalformed\n",
+		sum256(body) + " ignored " + name + "\n",
+		sum256(body) + "  " + name + "\n" + strings.Repeat("0", 64) + "  " + name + "\n",
+		sum256(body) + "  " + name + "\n" + strings.Repeat("x", 1<<20),
+	} {
+		t.Run(fmt.Sprintf("bytes-%d", len(manifest)), func(t *testing.T) {
+			r := &release{tag: "v2.0.0", assetName: name, assetBody: body, sums: manifest}
+			c := serveRelease(t, r)
+			c.GOOS, c.GOARCH = "linux", "amd64"
+			target := installTarget(t, c)
+			rel, err := c.Latest(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Apply(context.Background(), c, rel, nil); err == nil {
+				t.Error("installed with malformed manifest")
+			}
+			assertOldInstall(t, target)
+		})
+	}
+}
+
+func TestApplyRejectsCorruptArchiveTrailer(t *testing.T) {
+	body := tarGz(t, map[string][]byte{"k10s": fakeBinary("NEW")})
+	body[len(body)-8] ^= 0xff // corrupt gzip CRC, while the manifest matches these bytes
+	r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_linux_amd64.tar.gz", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
+	c := serveRelease(t, r)
+	c.GOOS, c.GOARCH = "linux", "amd64"
+	target := installTarget(t, c)
+	rel, err := c.Latest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(context.Background(), c, rel, nil); err == nil {
+		t.Error("installed corrupt archive")
+	}
+	assertOldInstall(t, target)
+}
+
+func TestApplyFailuresPreserveExecutable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       []byte
+		manifest   string
+		missingURL bool
+	}{
+		{name: "manifest-http-error", body: fakeBinary("NEW"), missingURL: true},
+		{name: "invalid-digest", body: fakeBinary("NEW"), manifest: "not-hex"},
+		{name: "empty-manifest", body: fakeBinary("NEW"), manifest: "\n"},
+		{name: "broken-archive", body: []byte("not a gzip archive")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_linux_amd64.tar.gz", assetBody: tc.body}
+			r.sums = sum256(tc.body) + "  " + r.assetName + "\n"
+			if tc.manifest != "" {
+				r.sums = tc.manifest + "  " + r.assetName + "\n"
+			}
+			if tc.name == "empty-manifest" {
+				r.sums = "\n"
+			}
+			c := serveRelease(t, r)
+			c.GOOS, c.GOARCH = "linux", "amd64"
+			target := installTarget(t, c)
+			rel, err := c.Latest(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.missingURL {
+				rel.Sums.URL += ".missing"
+			}
+			if _, err := Apply(context.Background(), c, rel, nil); err == nil {
+				t.Error("unexpected successful install")
+			}
+			assertOldInstall(t, target)
+		})
+	}
+}
+
 func TestApplyReadsAZipRelease(t *testing.T) {
 	body := zipOf(t, map[string][]byte{"k10s.exe": fakeBinary("WINNEW")})
 	r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_windows_amd64.zip", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "windows", "amd64"
 	target := installTarget(t, c)
@@ -214,6 +339,7 @@ func TestApplyReadsAZipRelease(t *testing.T) {
 func TestApplyAcceptsABareBinaryAsset(t *testing.T) {
 	body := fakeBinary("BARE")
 	r := &release{tag: "v2.0.0", assetName: "k10s-linux-amd64", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "linux", "amd64"
 	target := installTarget(t, c)
@@ -253,6 +379,7 @@ func TestApplyRefusesAChecksumMismatch(t *testing.T) {
 	if !bytes.Contains(got, []byte("OLD")) {
 		t.Error("a failed install damaged the existing binary")
 	}
+	assertOldInstall(t, target)
 }
 
 func TestApplyRefusesAnAssetMissingFromTheManifest(t *testing.T) {
@@ -261,13 +388,14 @@ func TestApplyRefusesAnAssetMissingFromTheManifest(t *testing.T) {
 		sums: sum256(body) + "  some-other-file.tar.gz\n"}
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "linux", "amd64"
-	installTarget(t, c)
+	target := installTarget(t, c)
 
 	rel, _ := c.Latest(context.Background())
 	_, err := Apply(context.Background(), c, rel, nil)
 	if err == nil || !strings.Contains(err.Error(), "does not list") {
 		t.Errorf("error = %v, want a refusal to install unverified", err)
 	}
+	assertOldInstall(t, target)
 }
 
 func TestApplyRejectsSomethingThatIsNotABinary(t *testing.T) {
@@ -275,6 +403,7 @@ func TestApplyRejectsSomethingThatIsNotABinary(t *testing.T) {
 	// 200. Renaming that over a working k10s would break the install.
 	body := []byte("<html><body>504 Gateway Timeout</body></html>")
 	r := &release{tag: "v2.0.0", assetName: "k10s-linux-amd64", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "linux", "amd64"
 	target := installTarget(t, c)
@@ -287,6 +416,7 @@ func TestApplyRejectsSomethingThatIsNotABinary(t *testing.T) {
 	if !bytes.Contains(got, []byte("OLD")) {
 		t.Error("the existing binary was replaced anyway")
 	}
+	assertOldInstall(t, target)
 }
 
 func TestApplyRefusesWhenNothingWasBuiltForThePlatform(t *testing.T) {
@@ -316,7 +446,11 @@ func TestApplyExplainsAnUnwritableInstallDirectory(t *testing.T) {
 	if err := os.Mkdir(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Errorf("restore permissions: %v", err)
+		}
+	})
 	c.Target = filepath.Join(dir, "k10s")
 
 	rel, _ := c.Latest(context.Background())
@@ -337,6 +471,7 @@ func TestApplyTakesTheLargestEntryWhenTheArchiveRenamedTheBinary(t *testing.T) {
 		"k10s_1.0.0_linux_amd64/k10s-binary": fakeBinary("RENAMED"),
 	})
 	r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_linux_amd64.tar.gz", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "linux", "amd64"
 	target := installTarget(t, c)
@@ -359,6 +494,7 @@ func TestApplyPrefersTheEntryNamedK10s(t *testing.T) {
 		"CHANGELOG.md": bytes.Repeat([]byte("x"), 1<<16),
 	})
 	r := &release{tag: "v2.0.0", assetName: "k10s_2.0.0_linux_amd64.tar.gz", assetBody: body}
+	r.sums = sum256(body) + "  " + r.assetName + "\n"
 	c := serveRelease(t, r)
 	c.GOOS, c.GOARCH = "linux", "amd64"
 	target := installTarget(t, c)
@@ -374,13 +510,13 @@ func TestApplyPrefersTheEntryNamedK10s(t *testing.T) {
 }
 
 func TestFindSumHandlesSha256sumFormats(t *testing.T) {
-	manifest := "aaaa  k10s_linux_amd64.tar.gz\n" +
-		"bbbb *k10s_darwin_arm64.tar.gz\n" + // "*" marks binary mode
-		"cccc  dist/k10s_windows_amd64.zip\n" // a path prefix from a dist dir
+	manifest := strings.Repeat("a", 64) + "  k10s_linux_amd64.tar.gz\n" +
+		strings.Repeat("b", 64) + " *k10s_darwin_arm64.tar.gz\n" + // "*" marks binary mode
+		strings.Repeat("c", 64) + "  dist/k10s_windows_amd64.zip\n" // a path prefix from a dist dir
 	for asset, want := range map[string]string{
-		"k10s_linux_amd64.tar.gz":  "aaaa",
-		"k10s_darwin_arm64.tar.gz": "bbbb",
-		"k10s_windows_amd64.zip":   "cccc",
+		"k10s_linux_amd64.tar.gz":  strings.Repeat("a", 64),
+		"k10s_darwin_arm64.tar.gz": strings.Repeat("b", 64),
+		"k10s_windows_amd64.zip":   strings.Repeat("c", 64),
 	} {
 		got, ok := findSum(manifest, asset)
 		if !ok || got != want {

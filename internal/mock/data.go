@@ -447,8 +447,8 @@ func cloneResourceFixtures() []resourceDef {
 	out := make([]resourceDef, len(resourceFixtures))
 	for i, fixture := range resourceFixtures {
 		out[i] = fixture
-		out[i].Kind.Cols = append([]string(nil), fixture.Kind.Cols...)
-		out[i].Kind.Allowed = append([]string(nil), fixture.Kind.Allowed...)
+		out[i].Cols = append([]string(nil), fixture.Cols...)
+		out[i].Allowed = append([]string(nil), fixture.Allowed...)
 		out[i].Rows = cloneRows(fixture.Rows)
 		out[i].Extra = make([]nsRow, len(fixture.Extra))
 		for j, extra := range fixture.Extra {

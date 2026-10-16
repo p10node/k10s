@@ -60,17 +60,21 @@ The complete installable example is at `examples/plugins.yaml`.
 
 ## Fields
 
-| Field | Meaning |
-|---|---|
-| `shortCut` | k9s notation such as `Ctrl-L`, `Shift-R`, `Alt-X`, or `x` |
-| `description` | label shown in the Actions pane and confirmation dialog |
-| `scopes` | resource aliases such as `po`, `deploy`, `svc`; `all` matches every view |
-| `command` | executable to run directly |
-| `args` | argument list, with variables expanded before execution |
-| `background` | start detached and return to k10s immediately |
-| `confirm` | show a confirmation dialog before running |
-| `dangerous` | render the plugin and confirmation with danger styling; hidden in `--readonly` mode |
-| `override` | let the plugin replace a built-in keybinding |
+| Field         | Meaning                                                                               |
+|---------------|---------------------------------------------------------------------------------------|
+| `shortCut`    | k9s notation such as `Ctrl-L`, `Shift-R`, `Alt-X`, or `x`                             |
+| `description` | label shown in the Actions pane and confirmation dialog                               |
+| `scopes`      | resource aliases such as `po`, `deploy`, `svc`; `all` matches every view              |
+| `command`     | executable to run directly                                                            |
+| `args`        | argument list, with variables expanded before execution                               |
+| `background`  | start detached and return to k10s immediately                                         |
+| `confirm`     | show a confirmation dialog before running                                             |
+| `dangerous`   | render the plugin and confirmation with danger styling; not a security classification |
+| `override`    | let the plugin replace a built-in keybinding                                          |
+
+All external plugins are blocked in `--readonly` mode, including definitions
+with `dangerous: false`. External processes do not inherit k10s's read-only
+HTTP transport, and no unsafe-plugin opt-in is provided.
 
 Without `override: true`, built-in k10s keys win. For shell syntax, pipes, or
 redirection, explicitly run a shell just as in k9s:

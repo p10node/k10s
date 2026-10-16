@@ -8,8 +8,8 @@
 ### The Kubernetes terminal UI you can *click*.
 
 **k9s taught us to live in the terminal. k10s makes that terminal
-point-and-click, instantly searchable, themeable - and gives it an AI that
-already knows your cluster, namespace and selected object.**
+point-and-click, searchable and themeable.** The experimental AI prompt is
+disabled in this build; it is not an available cluster investigation tool.
 
 [![status](https://img.shields.io/badge/status-live-brightgreen)](docs/roadmap.md)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -52,9 +52,8 @@ and **how little you have to remember**.
   nothing - informers start lazily, per kind, the first time you look at
   one. Opening Pods watches pods, not every Secret and Event you own.
   ([how, and the regression guards](docs/performance.md))
-- **AI that can see the screen.** `ctrl+a`, ask in plain English. The current
-  context, namespace, kind and selected object are injected into the prompt,
-  so "why is this pod unhealthy?" means *this* pod.
+- **Explicit feature status.** The AI integration is being reworked and is
+  disabled. `ctrl+a` explains that status rather than sending a request.
 - **It updates itself.** `/update` installs the newest release over the
   running binary - checksum-verified, atomic, offers to restart into it.
 - **Your k9s-style command plugins fit.** Put scoped shortcuts in
@@ -190,7 +189,11 @@ built-in shortcut deliberately, and are clickable in the same pane. See the
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### An AI prompt that already has the context
+### AI prompt — disabled in this build
+
+The mockup below documents the retained experimental design, not a currently
+available feature. The underlying integration supplies identity labels only;
+it does not inspect logs, YAML, events or pod health automatically.
 
 ```
 ╭─ Prompt · plain text → AI · /commands still work · esc close ─ [ grow ] [ AI · claude-sonnet-5 ] ╮
@@ -199,12 +202,10 @@ built-in shortcut deliberately, and are clickable in the same pane. See the
  ● AI mode — plain text goes to claude-sonnet-5    tab panes · enter open · ctrl+p search · f find…
 ```
 
-`ctrl+a` toggles it. Bring your own key - **OpenAI-compatible** (so also
-Groq, Together, OpenRouter, vLLM, Ollama, LM Studio, any local gateway) or
-**Anthropic**. Answers open as a normal text view you can scroll, zoom and
-close. No cluster data leaves your machine unless you press enter in AI
-mode. The only other network call k10s makes on its own is the once-a-day
-update check, which asks GitHub for a version number and nothing else.
+`ctrl+a` displays an unavailable notice. The retained provider code supports
+OpenAI-compatible endpoints and Anthropic, but the UI does not invoke it.
+Normal Kubernetes API traffic and the optional GitHub update check are separate
+from this disabled integration.
 
 ### Eight built-in themes, plus your own — previewed live
 
@@ -243,7 +244,7 @@ k10s is younger and deliberately narrower. The difference is philosophy:
 | Primary input | keyboard-first, command-driven                  | **mouse *and* keyboard, equally**                            |
 | Discovery     | you learn the commands                          | **the actions for the selected object are listed on screen** |
 | Search        | per-view filter, plus `:` to jump between views | **one box (`ctrl+p`) over kinds *and* objects**              |
-| AI            | plugin territory                                | **built in, with cluster context injected**                  |
+| AI            | plugin territory                                | experimental integration, **disabled in this build**         |
 | Scope         | very large, plugin ecosystem                    | **small, opinionated, core command-plugin compatibility**   |
 | Upgrades      | your package manager                            | **`k10s update`, self-replacing**                            |
 
@@ -266,7 +267,7 @@ The short version - the [full reference is here](docs/keybindings.md).
 | `enter` / double-click                 | open it: logs if it has them, else describe          |
 | `z`                                    | zoom / restore the centre pane                       |
 | `:` / `/`                              | command prompt (with a suggestions popup)            |
-| `ctrl+a`                               | AI prompt mode ✦                                     |
+| `ctrl+a`                               | AI unavailable notice                                |
 | `T` / `ctrl+t`                         | cycle themes                                         |
 | `ctrl+s`                               | copy mode - release the mouse to select & copy       |
 | click / wheel                          | anywhere in a pane selects it, blank space included  |
@@ -321,9 +322,9 @@ persist to `~/.k10s/config.yaml` (override with `K10S_CONFIG`), saved on
 every change.
 See [config.md](docs/config.md).
 
-> **Note:** the AI API key is stored as plain text in that file (mode 0600)
-> and masked in the UI. If that is not acceptable in your environment, leave
-> it empty and AI mode simply stays off.
+> **Note:** legacy AI settings can include a plain-text API key (mode 0600).
+> AI stays disabled regardless of those settings. Do not configure a key for
+> this build.
 
 ## Docs
 

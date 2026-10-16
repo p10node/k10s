@@ -69,6 +69,7 @@ func TestStartupKeepsCustomThemeErrorsVisibleThroughConnect(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("K10S_CONFIG", filepath.Join(root, "config.yaml"))
 	themeDir := filepath.Join(root, "themes")
+	t.Setenv("K10S_THEME_DIR", themeDir)
 	if err := os.MkdirAll(themeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

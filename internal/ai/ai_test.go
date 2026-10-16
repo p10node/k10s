@@ -30,9 +30,13 @@ func TestAskOpenAISendsExpectedRequestAndParsesReply(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"content":"pods look fine"}}]}`))
+		if _, err := w.Write([]byte(`{"choices":[{"message":{"content":"pods look fine"}}]}`)); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -73,9 +77,13 @@ func TestAskAnthropicSendsExpectedRequestAndParsesReply(t *testing.T) {
 		gotPath = r.URL.Path
 		gotKey = r.Header.Get("x-api-key")
 		gotVersion = r.Header.Get("anthropic-version")
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"content":[{"text":"looks "},{"text":"healthy"}]}`))
+		if _, err := w.Write([]byte(`{"content":[{"text":"looks "},{"text":"healthy"}]}`)); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -104,7 +112,9 @@ func TestAskAnthropicSendsExpectedRequestAndParsesReply(t *testing.T) {
 func TestAskSurfacesHTTPErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+		if _, err := w.Write([]byte(`{"error":{"message":"invalid api key"}}`)); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	}))
 	defer srv.Close()
 

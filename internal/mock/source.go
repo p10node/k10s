@@ -247,7 +247,7 @@ func (s *Source) Delete(kind, ns, name string) error {
 	if eff == "default" {
 		out := r.Rows[:0]
 		for _, row := range r.Rows {
-			if !(idx < len(row) && row[idx] == name) {
+			if idx >= len(row) || row[idx] != name {
 				out = append(out, row)
 			}
 		}
@@ -256,7 +256,7 @@ func (s *Source) Delete(kind, ns, name string) error {
 	}
 	out := r.Extra[:0]
 	for _, e := range r.Extra {
-		if !(e.NS == eff && idx < len(e.Row) && e.Row[idx] == name) {
+		if e.NS != eff || idx >= len(e.Row) || e.Row[idx] != name {
 			out = append(out, e)
 		}
 	}

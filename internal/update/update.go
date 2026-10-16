@@ -169,7 +169,8 @@ func (c *Client) Latest(ctx context.Context) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// Reading determines success; closing the read-only body is best-effort cleanup.
+	defer func() { _ = resp.Body.Close() }()
 
 	// The two failures worth naming: a repo with no releases yet (404, and
 	// "not found" alone sends people looking for a typo), and the anonymous

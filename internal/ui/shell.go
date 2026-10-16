@@ -34,13 +34,25 @@ type shellOutMsg struct {
 // startShellSession opens an in-panel shell, sized to the pane it will be
 // drawn in.
 func (m *Model) startShellSession(kind, ns, name string) tea.Cmd {
+	m.backToTable()
+	session, view, release := m.connGen, m.viewGen, m.leaseSource()
 	cols, rows := m.shellSize()
 	src := m.src
 	m.startBusy("shell " + name)
 
 	return func() tea.Msg {
 		sess, err := src.ShellSession(kind, ns, name, cols, rows)
-		return shellStartMsg{kind: kind, ns: ns, name: name, sess: sess, cols: cols, rows: rows, err: err}
+		if err != nil || sess == nil {
+			if sess != nil {
+				_ = sess.Close()
+			}
+			release()
+			sess = nil
+		} else {
+			owned := sess
+			sess = &leasedShell{ShellSession: owned, stop: leasedStop(func() { _ = owned.Close() }, release)}
+		}
+		return shellStartMsg{session: session, view: view, kind: kind, ns: ns, name: name, sess: sess, cols: cols, rows: rows, err: err}
 	}
 }
 
@@ -72,7 +84,9 @@ func (m *Model) handleShellKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if b := keyBytes(msg); len(b) > 0 {
-		m.shellSess.Write(b)
+		if _, err := m.shellSess.Write(b); err != nil {
+			m.closeShell("shell input: " + err.Error())
+		}
 	}
 	return nil
 }
@@ -130,7 +144,9 @@ func keyBytes(msg tea.KeyMsg) []byte {
 // closeShell tears down the session and returns to the table.
 func (m *Model) closeShell(toast string) {
 	if m.shellSess != nil {
-		m.shellSess.Close()
+		if err := m.shellSess.Close(); err != nil {
+			toast = "close shell: " + err.Error()
+		}
 		m.shellSess = nil
 	}
 	m.shellTerm = nil

@@ -149,7 +149,10 @@ func (m *Model) closeSettings() tea.Cmd {
 	m.setOpen = false
 	m.input.SetValue("")
 	m.input.Blur()
-	m.saveConfig()
+	if err := m.saveConfig(); err != nil {
+		m.toast = "save settings: " + err.Error()
+		return nil
+	}
 	m.toast = "settings saved → " + config.Path()
 	return nil
 }

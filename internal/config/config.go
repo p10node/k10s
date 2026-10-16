@@ -32,7 +32,25 @@ type Update struct {
 	Skip string `yaml:"skip"`
 }
 
+// Logs bounds retained text, not total process memory. Zero/invalid uses defaults.
+type Logs struct {
+	MaxLines int `yaml:"max_lines"`
+	MaxBytes int `yaml:"max_bytes"`
+}
+
+func (l Logs) Limits() (int, int) {
+	lines, bytes := l.MaxLines, l.MaxBytes
+	if lines <= 0 || lines > 100000 {
+		lines = 5000
+	}
+	if bytes <= 0 || bytes > 64*1024*1024 {
+		bytes = 4 * 1024 * 1024
+	}
+	return lines, bytes
+}
+
 type Config struct {
+	Logs      Logs   `yaml:"logs"`
 	Theme     string `yaml:"theme"`
 	Context   string `yaml:"context"`
 	Namespace string `yaml:"namespace"`
@@ -131,6 +149,8 @@ func render(c Config) string {
 	}
 	fmt.Fprintf(&b, "collapsed: %q\n", collapsed)
 	fmt.Fprintf(&b, "zoomed: %v\n", c.Zoomed)
+	b.WriteString("logs:\n")
+	fmt.Fprintf(&b, "  max_lines: %d\n  max_bytes: %d\n", c.Logs.MaxLines, c.Logs.MaxBytes)
 	b.WriteString("ai:\n")
 	fmt.Fprintf(&b, "  provider: %q\n", c.AI.Provider)
 	fmt.Fprintf(&b, "  base_url: %q\n", c.AI.BaseURL)
@@ -195,6 +215,16 @@ func parse(s string, c *Config) {
 			}
 		case !indented && key == "zoomed":
 			c.Zoomed = val == "true"
+		case indented && section == "logs":
+			n, err := strconv.Atoi(val)
+			if err == nil {
+				switch key {
+				case "max_lines":
+					c.Logs.MaxLines = n
+				case "max_bytes":
+					c.Logs.MaxBytes = n
+				}
+			}
 		case indented && section == "ai":
 			switch key {
 			case "provider":

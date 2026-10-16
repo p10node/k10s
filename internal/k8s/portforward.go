@@ -1,14 +1,15 @@
 package k8s
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport/spdy"
 	"k8s.io/kubectl/pkg/util"
 )
 
@@ -29,17 +30,16 @@ func (s *Store) PortForward(kind, ns, name string) (string, func(), error) {
 
 	req := s.c.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Namespace(ens).Name(podName).SubResource("portforward")
-	transport, upgrader, err := spdy.RoundTripperFor(s.c.RestConfig)
+	dialer, err := newForwardDialer(s.c.RestConfig, req.URL())
 	if err != nil {
 		return "", nil, err
 	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
 
 	stopCh := make(chan struct{})
 	readyCh := make(chan struct{})
 	errCh := make(chan error, 1)
 
-	fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, remotePort)}, stopCh, readyCh, io.Discard, io.Discard)
+	fw, err := portforward.NewForStreaming(dialer, []string{fmt.Sprintf("%d:%d", localPort, remotePort)}, stopCh, readyCh, io.Discard, io.Discard)
 	if err != nil {
 		return "", nil, err
 	}
@@ -65,9 +65,11 @@ func (s *Store) PortForward(kind, ns, name string) (string, func(), error) {
 // pod, its first container port; for a service, one ready backing pod and
 // the service's first port.
 func (s *Store) portForwardTarget(kind, ns, name string) (pod string, port int, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	switch kind {
 	case "pods":
-		p, err := s.podLister(ns).Pods(ns).Get(name)
+		p, err := s.c.Clientset.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return "", 0, err
 		}
@@ -76,7 +78,7 @@ func (s *Store) portForwardTarget(kind, ns, name string) (pod string, port int, 
 		}
 		return p.Name, int(p.Spec.Containers[0].Ports[0].ContainerPort), nil
 	case "services":
-		svc, err := s.svcLister(ns).Services(ns).Get(name)
+		svc, err := s.c.Clientset.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return "", 0, err
 		}
@@ -87,12 +89,16 @@ func (s *Store) portForwardTarget(kind, ns, name string) (pod string, port int, 
 			return "", 0, fmt.Errorf("service %s has no pod selector", name)
 		}
 		sel := labels.SelectorFromSet(labels.Set(svc.Spec.Selector))
-		pods, err := s.podLister(ns).Pods(ns).List(sel)
-		if err != nil || len(pods) == 0 {
+		list, err := s.c.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel.String()})
+		if err != nil {
+			return "", 0, err
+		}
+		pods := list.Items
+		if len(pods) == 0 {
 			return "", 0, fmt.Errorf("no backing pods found for service %s", name)
 		}
 		target := pods[0]
-		port, err := util.LookupContainerPortNumberByServicePort(*svc, *target, svc.Spec.Ports[0].Port)
+		port, err := util.LookupContainerPortNumberByServicePort(*svc, target, svc.Spec.Ports[0].Port)
 		if err != nil {
 			return "", 0, fmt.Errorf("resolve service %s port %d: %w", name, svc.Spec.Ports[0].Port, err)
 		}
@@ -106,6 +112,6 @@ func freeLocalPort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }

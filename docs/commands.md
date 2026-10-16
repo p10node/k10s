@@ -1,7 +1,7 @@
 # Prompt & commands
 
-The bottom panel has two modes, toggled with `ctrl+a` or by clicking the
-right-hand tag:
+The bottom panel runs commands. The retained AI mode is disabled; `ctrl+a`
+or the right-hand tag displays an unavailable notice.
 
 - **CMD ❯** — `/` and `:` commands run inside k10s; **anything else runs as
   a shell command** and its output opens in the main panel as a text view
@@ -13,9 +13,8 @@ right-hand tag:
   Two limits, both deliberate: a command is given **30 seconds**, and it is
   given **no terminal** — so anything interactive (`vim`, `top`, `kubectl
   exec -it`) waits and then times out. Use `s` on a pod for a real shell.
-- **AI ✦** — plain text goes to the configured model over HTTP; the answer
-  opens as a text view in the main pane (scroll/zoom/close like describe).
-  Commands still work in this mode.
+- **AI ✦ (unavailable)** — retained experimental integration, not a usable
+  prompt mode in this build.
 
 ## Search palette (`ctrl+p`)
 
@@ -43,23 +42,23 @@ mandatory (`:scale`, `:search`, `:filter`), where enter completes it instead
 so the argument can be typed; a resource command's argument is optional, so
 enter runs it. `tab` always completes rather than runs.
 
-| Command     | Args     | Effect                                                       |
-|-------------|----------|--------------------------------------------------------------|
-| `/theme`    |          | theme picker with live preview                               |
-| `/settings` |          | CLI name, AI provider **and** the update check, in one dialog |
-| `/mouse`    |          | toggle mouse capture — same as `ctrl+s`                      |
-| `/update`   | `[skip]` | check GitHub for a newer k10s and install it over this binary |
-| `/version`  |          | which build is running, and what the last check found        |
-| `/demo`     |          | switch to k10s's built-in demo cluster (`k10s-demo`) — sample data; `:ctx` leaves it |
+| Command     | Args     | Effect                                                                                        |
+|-------------|----------|-----------------------------------------------------------------------------------------------|
+| `/theme`    |          | theme picker with live preview                                                                |
+| `/settings` |          | CLI name and the update check; AI controls are disabled                                       |
+| `/mouse`    |          | toggle mouse capture — same as `ctrl+s`                                                       |
+| `/update`   | `[skip]` | check GitHub for a newer k10s and install it over this binary                                 |
+| `/version`  |          | which build is running, and what the last check found                                         |
+| `/demo`     |          | switch to k10s's built-in demo cluster (`k10s-demo`) — sample data; `:ctx` leaves it          |
 | `/setup`    |          | how to install kubectl and get a `~/.kube/config` — links, readable with no cluster connected |
-| `/help`     |          | keybindings + commands text view                             |
-| `:search`   | `<term>` | filter the resource list (left pane, by kind)                |
-| `:filter`   | `<term>` | filter rows of the table currently open (main pane)          |
-| `:scale`    | `<n>`    | scale the selected deployment/statefulset/replicaset         |
-| `:ns`       | `[name]` | the Namespaces table; with a name, switch straight to it     |
-| `:ctx`      | `[name]` | context picker; with a name, switch straight to it           |
-| `:aliases`  |          | every `:` name in one text view                              |
-| `:q`        |          | quit (`:quit`, `:qa` too)                                    |
+| `/help`     |          | keybindings + commands text view                                                              |
+| `:search`   | `<term>` | filter the resource list (left pane, by kind)                                                 |
+| `:filter`   | `<term>` | filter rows of the table currently open (main pane)                                           |
+| `:scale`    | `<n>`    | scale the selected deployment/statefulset/replicaset                                          |
+| `:ns`       | `[name]` | the Namespaces table; with a name, switch straight to it                                      |
+| `:ctx`      | `[name]` | context picker; with a name, switch straight to it                                            |
+| `:aliases`  |          | every `:` name in one text view                                                               |
+| `:q`        |          | quit (`:quit`, `:qa` too)                                                                     |
 
 Unknown commands toast `unknown command … — /help lists everything`.
 
@@ -76,38 +75,38 @@ They are generated from the kind list the connected backend serves, so a
 backend that adds a kind gets its command for free and the names can never
 drift from what the pane shows.
 
-| Group     | View                | Names                                                             |
-|-----------|---------------------|-------------------------------------------------------------------|
-| Workloads | Pods                | `:po` `:pods` `:pod`                                              |
-|           | Deployments         | `:deploy` `:deployments` `:deployment` `:dp`                      |
-|           | ReplicaSets         | `:rs` `:replicasets` `:replicaset`                                |
-|           | StatefulSets        | `:sts` `:statefulsets` `:statefulset`                             |
-|           | DaemonSets          | `:ds` `:daemonsets` `:daemonset`                                  |
-|           | Jobs                | `:job` `:jobs`                                                    |
-|           | CronJobs            | `:cj` `:cronjobs` `:cronjob`                                      |
-|           | HPAs                | `:hpa` `:hpas` `:horizontalpodautoscalers`                        |
-| Network   | Services            | `:svc` `:services` `:service`                                     |
-|           | Endpoints           | `:ep` `:endpoints` `:endpoint`                                    |
-|           | Ingresses           | `:ing` `:ingresses` `:ingress`                                    |
-|           | NetworkPolicies     | `:netpol` `:netpols` `:networkpolicies` `:networkpolicy`          |
-| Config    | ConfigMaps          | `:cm` `:configmaps` `:configmap`                                  |
-|           | Secrets             | `:sec` `:secrets` `:secret`                                       |
-|           | ResourceQuotas      | `:quota` `:quotas` `:resourcequotas` `:resourcequota`             |
-|           | LimitRanges         | `:limits` `:limitranges` `:limitrange`                            |
-|           | PDBs                | `:pdb` `:pdbs` `:poddisruptionbudgets`                            |
-| Storage   | PVCs                | `:pvc` `:pvcs` `:persistentvolumeclaims`                          |
-|           | PVs                 | `:pv` `:pvs` `:persistentvolumes` `:persistentvolume`             |
-|           | StorageClasses      | `:sc` `:storageclasses` `:storageclass`                           |
-| RBAC      | ServiceAccounts     | `:sa` `:serviceaccounts` `:serviceaccount`                        |
-|           | Roles               | `:role` `:roles`                                                  |
-|           | RoleBindings        | `:rb` `:rolebindings` `:rolebinding`                              |
-|           | ClusterRoles        | `:crole` `:clusterroles` `:croles` `:clusterrole`                 |
-|           | ClusterRoleBindings | `:crb` `:clusterrolebindings` `:crbs` `:clusterrolebinding`       |
-| Cluster   | Nodes               | `:no` `:nodes` `:node`                                            |
-|           | Namespaces          | `:ns` `:namespaces` `:namespace`                                  |
-|           | Events              | `:ev` `:events` `:event`                                          |
-| Custom    | CRDs                | `:crd` `:crds` `:customresourcedefinitions`                       |
-|           | Custom Resources    | `:cr` `:customresources` `:crs` `:customresource`                 |
+| Group     | View                | Names                                                       |
+|-----------|---------------------|-------------------------------------------------------------|
+| Workloads | Pods                | `:po` `:pods` `:pod`                                        |
+|           | Deployments         | `:deploy` `:deployments` `:deployment` `:dp`                |
+|           | ReplicaSets         | `:rs` `:replicasets` `:replicaset`                          |
+|           | StatefulSets        | `:sts` `:statefulsets` `:statefulset`                       |
+|           | DaemonSets          | `:ds` `:daemonsets` `:daemonset`                            |
+|           | Jobs                | `:job` `:jobs`                                              |
+|           | CronJobs            | `:cj` `:cronjobs` `:cronjob`                                |
+|           | HPAs                | `:hpa` `:hpas` `:horizontalpodautoscalers`                  |
+| Network   | Services            | `:svc` `:services` `:service`                               |
+|           | Endpoints           | `:ep` `:endpoints` `:endpoint`                              |
+|           | Ingresses           | `:ing` `:ingresses` `:ingress`                              |
+|           | NetworkPolicies     | `:netpol` `:netpols` `:networkpolicies` `:networkpolicy`    |
+| Config    | ConfigMaps          | `:cm` `:configmaps` `:configmap`                            |
+|           | Secrets             | `:sec` `:secrets` `:secret`                                 |
+|           | ResourceQuotas      | `:quota` `:quotas` `:resourcequotas` `:resourcequota`       |
+|           | LimitRanges         | `:limits` `:limitranges` `:limitrange`                      |
+|           | PDBs                | `:pdb` `:pdbs` `:poddisruptionbudgets`                      |
+| Storage   | PVCs                | `:pvc` `:pvcs` `:persistentvolumeclaims`                    |
+|           | PVs                 | `:pv` `:pvs` `:persistentvolumes` `:persistentvolume`       |
+|           | StorageClasses      | `:sc` `:storageclasses` `:storageclass`                     |
+| RBAC      | ServiceAccounts     | `:sa` `:serviceaccounts` `:serviceaccount`                  |
+|           | Roles               | `:role` `:roles`                                            |
+|           | RoleBindings        | `:rb` `:rolebindings` `:rolebinding`                        |
+|           | ClusterRoles        | `:crole` `:clusterroles` `:croles` `:clusterrole`           |
+|           | ClusterRoleBindings | `:crb` `:clusterrolebindings` `:crbs` `:clusterrolebinding` |
+| Cluster   | Nodes               | `:no` `:nodes` `:node`                                      |
+|           | Namespaces          | `:ns` `:namespaces` `:namespace`                            |
+|           | Events              | `:ev` `:events` `:event`                                    |
+| Custom    | CRDs                | `:crd` `:crds` `:customresourcedefinitions`                 |
+|           | Custom Resources    | `:cr` `:customresources` `:crs` `:customresource`           |
 
 **The first name is what the popup shows** — the short form, the same one the
 sidebar and toasts use (`po/api-gateway`). The rest match while you type but
@@ -212,11 +211,11 @@ The same check also runs once a day at startup and only speaks up when there
 is something newer, as a toast plus a clickable `⇧ 1.4.0` badge in the status
 bar. Three levels of "not now":
 
-| | |
-|---|---|
-| `esc` on the dialog | not this time |
-| `/update skip` | stop mentioning *this* release; the check stays on |
-| `/settings` → `UPDATES` → `off` | stop checking at all; `/update` still works |
+|                                 |                                                    |
+|---------------------------------|----------------------------------------------------|
+| `esc` on the dialog             | not this time                                      |
+| `/update skip`                  | stop mentioning *this* release; the check stays on |
+| `/settings` → `UPDATES` → `off` | stop checking at all; `/update` still works        |
 
 Outside the TUI: `k10s update` and `k10s --version`. Full behaviour in
 [update.md](update.md).
@@ -230,9 +229,9 @@ can go before or after `demo`.
   Restart, Cordon, Drain and Delete are gone, and so are Shell and Port
   Forward, which open a session into the cluster. Their keys, `:scale`
   included, answer with a notice instead of a dialog.
-- Plugins marked `dangerous: true` are hidden, as in k9s, and typed shell
-  commands do not run: they run as you, outside k10s, so read-only mode
-  cannot vouch for them.
+- All external plugins and typed shell commands are blocked. They run outside
+  k10s's guarded Kubernetes transport; `dangerous: false` is not evidence
+  that a command is read-only.
 - The header says READ-ONLY for as long as the mode is on.
 - The same rule holds on the wire: every client k10s builds refuses, before
   it leaves the machine, any request other than GET, HEAD or OPTIONS, the
@@ -241,6 +240,11 @@ can go before or after `demo`.
   still cannot write.
 
 ## AI settings (`/settings`)
+
+**Disabled in this build.** `ctrl+a` shows an unavailable notice and the AI
+settings controls cannot be used. The following retained provider/schema
+reference is not an active setup guide. No automatic inspection of logs,
+YAML, events or pod health is implemented by the provider integration.
 
 | Field    | Notes                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|

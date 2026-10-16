@@ -191,3 +191,16 @@ func TestContextPickerRetriesTheFailedContext(t *testing.T) {
 		t.Errorf("connect called %d times, want a second attempt", asked)
 	}
 }
+
+// goOffline swaps the source, so the lease owner must follow it: otherwise
+// the next successful connect retires the wrong one.
+func TestGoOfflineMovesLeaseOwnerToTheOfflineSource(t *testing.T) {
+	m := newStartupModel(t, noCluster("connection refused"))
+	m.Update(m.connectCmd("")())
+	if !m.offline {
+		t.Fatal("precondition: connect should have failed")
+	}
+	if m.sourceOwner == nil || m.sourceOwner.src != m.src {
+		t.Fatal("lease owner left on the source goOffline replaced")
+	}
+}

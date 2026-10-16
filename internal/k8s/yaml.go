@@ -25,14 +25,14 @@ func (s *Store) YAML(kind, ns, name string) (string, error) {
 	var err error
 
 	if kind == "customresources" {
-		gvr, namespaced, actualNS, _, ok := s.resolveCR(ns, name)
-		if !ok {
-			return "", fmt.Errorf("custom resource %q not found", name)
+		cr, rerr := s.resolveCR(ns, name)
+		if rerr != nil {
+			return "", rerr
 		}
-		if namespaced {
-			obj, err = s.c.Dynamic.Resource(gvr).Namespace(actualNS).Get(ctx, name, metav1.GetOptions{})
+		if cr.namespaced {
+			obj, err = s.c.Dynamic.Resource(cr.gvr).Namespace(cr.ns).Get(ctx, name, metav1.GetOptions{})
 		} else {
-			obj, err = s.c.Dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+			obj, err = s.c.Dynamic.Resource(cr.gvr).Get(ctx, name, metav1.GetOptions{})
 		}
 	} else {
 		gvr, namespaced, gerr := s.gvrFor(kind)
@@ -68,22 +68,16 @@ func (s *Store) Apply(kind, ns, name, y string) error {
 	}
 
 	if kind == "customresources" {
-		gvr, namespaced, actualNS, _, ok := s.resolveCR(ns, name)
-		if !ok {
-			return fmt.Errorf("custom resource %q not found", name)
+		cr, rerr := s.resolveCR(ns, name)
+		if rerr != nil {
+			return rerr
 		}
-		ri := s.c.Dynamic.Resource(gvr)
+		ri := s.c.Dynamic.Resource(cr.gvr)
 		var riNS dynamic.ResourceInterface = ri
-		if namespaced {
-			riNS = ri.Namespace(actualNS)
+		if cr.namespaced {
+			riNS = ri.Namespace(cr.ns)
 		}
-		cur, err := riNS.Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		next.SetResourceVersion(cur.GetResourceVersion())
-		_, err = riNS.Update(ctx, &next, metav1.UpdateOptions{})
-		return err
+		return updateEdited(ctx, riNS, name, &next)
 	}
 
 	gvr, namespaced, err := s.gvrFor(kind)
@@ -95,11 +89,23 @@ func (s *Store) Apply(kind, ns, name, y string) error {
 	if namespaced {
 		riNS = ri.Namespace(effectiveNS(ns))
 	}
-	cur, err := riNS.Get(ctx, name, metav1.GetOptions{})
+	return updateEdited(ctx, riNS, name, &next)
+}
+
+// The GET verifies identity only. Its newer resourceVersion must never replace
+// the version from the user's edit; the API server arbitrates stale writes.
+func updateEdited(ctx context.Context, ri dynamic.ResourceInterface, name string, next *unstructured.Unstructured) error {
+	cur, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	next.SetResourceVersion(cur.GetResourceVersion())
-	_, err = riNS.Update(ctx, &next, metav1.UpdateOptions{})
+	if next.GetResourceVersion() == "" {
+		return fmt.Errorf("edited manifest must retain metadata.resourceVersion; reload before editing")
+	}
+	if next.GetName() != name || next.GetNamespace() != cur.GetNamespace() ||
+		next.GetUID() != cur.GetUID() || next.GroupVersionKind() != cur.GroupVersionKind() {
+		return fmt.Errorf("edited manifest identity differs from target; reload before editing")
+	}
+	_, err = ri.Update(ctx, next, metav1.UpdateOptions{})
 	return err
 }

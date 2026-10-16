@@ -38,7 +38,7 @@ func (s *execSession) Resize(cols, rows int) {
 func (s *execSession) Close() error {
 	s.closeOnce.Do(func() {
 		s.cancel()
-		s.stdin.Close()
+		_ = s.stdin.Close() // io.PipeWriter.Close always returns nil.
 	})
 	return nil
 }
@@ -96,7 +96,7 @@ func (s *Store) ShellSession(kind, ns, name string, cols, rows int) (domain.Shel
 
 	go func() {
 		defer close(sess.out)
-		defer pr.Close()
+		defer func() { _ = pr.Close() }() // io.PipeReader.Close always returns nil.
 		err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 			Stdin:  pr,
 			Stdout: ow,
@@ -106,7 +106,8 @@ func (s *Store) ShellSession(kind, ns, name string, cols, rows int) (domain.Shel
 			TerminalSizeQueue: sizeQueue{ch: sess.sizes, done: ctx.Done()},
 		})
 		if err != nil && ctx.Err() == nil {
-			ow.Write([]byte("\r\n\x1b[31m" + err.Error() + "\x1b[0m\r\n"))
+			// A canceled output consumer cannot receive the final diagnostic.
+			_, _ = ow.Write([]byte("\r\n\x1b[31m" + err.Error() + "\x1b[0m\r\n"))
 		}
 	}()
 

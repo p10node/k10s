@@ -17,7 +17,7 @@
 | `/`                    | commands — namespace, context, theme, settings                                                                                |
 | `:`                    | narrowing — search, filter, scale                                                                                             |
 | `f`                    | find: focus the main table's row-search box                                                                                   |
-| `ctrl+a`               | toggle AI prompt mode (also focuses prompt)                                                                                   |
+| `ctrl+a`               | show AI unavailable notice (disabled in this build)                                                                          |
 
 ## Movement
 

@@ -44,7 +44,9 @@ func apiServer(t *testing.T, status int, body string) *httptest.Server {
 			t.Errorf("Accept = %q, want the GitHub media type", got)
 		}
 		w.WriteHeader(status)
-		fmt.Fprint(w, body)
+		if _, err := fmt.Fprint(w, body); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	return srv

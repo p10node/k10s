@@ -54,11 +54,11 @@ func effectiveNS(ns string) string {
 // including CRD instances.
 func (s *Store) Describe(kind, ns, name string) (string, error) {
 	if kind == "customresources" {
-		gvr, namespaced, actualNS, crdKind, ok := s.resolveCR(ns, name)
-		if !ok {
-			return "", fmt.Errorf("custom resource %q not found", name)
+		cr, err := s.resolveCR(ns, name)
+		if err != nil {
+			return "", err
 		}
-		return s.genericDescribe(gvr, namespaced, actualNS, name, crdKind)
+		return s.genericDescribe(cr.gvr, cr.namespaced, cr.ns, name, cr.kind)
 	}
 
 	if gk, ok := kindToGK[kind]; ok {

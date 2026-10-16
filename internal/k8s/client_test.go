@@ -55,11 +55,15 @@ func TestSwitchContextWithKubeconfigList(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/version" {
-			fmt.Fprint(w, `{"major":"1","minor":"33","gitVersion":"v1.33.0"}`)
+			if _, err := fmt.Fprint(w, `{"major":"1","minor":"33","gitVersion":"v1.33.0"}`); err != nil {
+				t.Errorf("test HTTP I/O: %v", err)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`)
+		if _, err := fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`); err != nil {
+			t.Errorf("test HTTP I/O: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()

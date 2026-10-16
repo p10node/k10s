@@ -52,12 +52,12 @@ func (m *Model) goOffline(why string) tea.Cmd {
 		return nil
 	}
 	m.offline, m.offlineWhy = true, strings.TrimSpace(why)
-	m.src = &pendingSource{
+	m.installSource(&pendingSource{
 		kinds:    m.src.Kinds(),
 		contexts: m.src.Contexts(),
 		ctx:      m.connName,
 		err:      errNoCluster,
-	}
+	})
 	m.mode = modeTable
 	m.rowIdx, m.rowScroll = 0, 0
 	m.toast = m.withThemeWarning("no cluster — r retries · /setup shows how to connect one")

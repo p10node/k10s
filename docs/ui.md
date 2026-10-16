@@ -1,5 +1,9 @@
 # UI
 
+AI is disabled in this build. Any AI-mode layouts or controls described below
+are retained design reference, not an available workflow. `ctrl+a` displays
+an unavailable notice; the AI settings controls are disabled.
+
 ## Layout
 
 ```
@@ -211,6 +215,11 @@ centred spinner, an indeterminate bar and a one-line explanation — never
 "no resources found", which would be a lie. The repaint tick runs faster
 (150ms) while loading and backs off to 2s once synced.
 
+When the list or watch fails, or a watch the server closed is not
+re-established within a few seconds, an empty pane shows that error in place
+of the spinner. Rows already cached stay on screen; the error clears once the
+watch is back.
+
 ### Demo
 
 While the demo backend is on screen the header shows its context in the warn
@@ -267,7 +276,8 @@ Notable behavior:
 - **Shell** (`s`) opens a real interactive exec session **inside the main
   panel** — see below.
 - **Port Forward** (`p`) starts a real forward on an ephemeral local port and
-  toasts the address; pressing it again stops that forward.
+  toasts the address; pressing it again stops that forward, or cancels it
+  while it is still connecting.
 - **Edit** (`e`) fetches live YAML into a temp file, hands the terminal to
   `$EDITOR`, and applies the result on exit.
 - **Scale** (`c`) pre-fills the prompt with `:scale <current>` instead of
@@ -279,7 +289,8 @@ Notable behavior:
   cell gains a warn-colored `,SchedulingDisabled` suffix — the same
   convention `kubectl get nodes` uses.
 - **Drain** (`u`, nodes only) cordons, then evicts every non-DaemonSet,
-  non-mirror pod via the eviction API, reporting any that refused.
+  non-mirror pod via the eviction API, reporting any that refused. A pod
+  with no controller blocks the drain before the node is cordoned.
 
 ## Prompt
 

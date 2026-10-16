@@ -39,7 +39,10 @@ func main() {
 	if os.Getenv("K10S_CONFIG") == "" {
 		dir, err := os.MkdirTemp("", "k10s-shot-")
 		if err == nil {
-			os.Setenv("K10S_CONFIG", filepath.Join(dir, "config.yaml"))
+			if err := os.Setenv("K10S_CONFIG", filepath.Join(dir, "config.yaml")); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		}
 	}
 	w, h := 140, 44

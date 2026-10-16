@@ -22,8 +22,8 @@ func (m *Model) availablePlugins() []plugin.Named {
 	aliases = append(aliases, kind.Key, kind.Short, strings.ToLower(kind.Name))
 	out := make([]plugin.Named, 0, len(m.plugins))
 	for _, item := range m.plugins {
-		// k9s's rule: read-only mode drops the plugins marked dangerous.
-		if m.readOnly && item.Dangerous {
+		// External programs bypass the application's read-only transport.
+		if m.readOnly {
 			continue
 		}
 		if item.MatchesScope(aliases...) {
@@ -83,11 +83,12 @@ func (m *Model) firePlugin(item plugin.Named) tea.Cmd {
 	}
 
 	label := pluginLabel(item)
-	if m.readOnly && item.Dangerous {
-		m.toast = "✗ read-only mode: " + label + " is marked dangerous"
+	if m.readOnly {
+		m.toast = "✗ read-only mode: external plugins are disabled"
 		return nil
 	}
 	vars := m.pluginVars()
+	session := m.connGen
 	if item.Confirm {
 		name, namespace := m.curName(), m.curNamespace()
 		m.confirm = &confirmState{
@@ -100,7 +101,13 @@ func (m *Model) firePlugin(item plugin.Named) tea.Cmd {
 				"",
 				item.DisplayCommand(vars),
 			},
-			onOK: func(mm *Model) tea.Cmd { return mm.runPlugin(item, vars) },
+			onOK: func(mm *Model) tea.Cmd {
+				if session != mm.connGen {
+					mm.toast = "✗ session changed; confirm on current target"
+					return nil
+				}
+				return mm.runPlugin(item, vars)
+			},
 		}
 		return nil
 	}
@@ -108,24 +115,31 @@ func (m *Model) firePlugin(item plugin.Named) tea.Cmd {
 }
 
 func (m *Model) runPlugin(item plugin.Named, vars plugin.Vars) tea.Cmd {
+	if m.readOnly {
+		m.toast = "✗ read-only mode: external plugins are disabled"
+		return nil
+	}
 	label := pluginLabel(item)
+	session := m.connGen
 	cmd := item.ExecCommand(vars)
 	if item.Background {
 		m.toast = "… plugin " + label
 		return func() tea.Msg {
 			if err := cmd.Start(); err != nil {
-				return actionResultMsg{err: fmt.Errorf("plugin %s: %w", item.Name, err)}
+				return actionResultMsg{session: session, err: fmt.Errorf("plugin %s: %w", item.Name, err)}
 			}
 			if err := cmd.Process.Release(); err != nil {
-				return actionResultMsg{err: fmt.Errorf("plugin %s: %w", item.Name, err)}
+				return actionResultMsg{session: session, err: fmt.Errorf("plugin %s: %w", item.Name, err)}
 			}
-			return actionResultMsg{toast: "✓ plugin " + label + " started in background"}
+			return actionResultMsg{session: session, toast: "✓ plugin " + label + " started in background"}
 		}
 	}
 
 	m.toast = "⟩ plugin " + label
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return foregroundPluginResult(item, label, err)
+		msg := foregroundPluginResult(item, label, err)
+		msg.session = session
+		return msg
 	})
 }
 

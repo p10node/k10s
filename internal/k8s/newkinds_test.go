@@ -73,9 +73,9 @@ func fixtures() []runtime.Object {
 				}},
 			},
 		},
-		&corev1.Endpoints{
+		&corev1.Endpoints{ //nolint:staticcheck // Exercise the supported legacy Endpoints resource, not EndpointSlice.
 			ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "default"},
-			Subsets: []corev1.EndpointSubset{{
+			Subsets: []corev1.EndpointSubset{{ //nolint:staticcheck // Legacy Endpoints fixture requires its matching subset type.
 				Addresses: []corev1.EndpointAddress{{IP: "10.244.1.5"}},
 				Ports:     []corev1.EndpointPort{{Port: 8080}},
 			}},

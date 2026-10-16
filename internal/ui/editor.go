@@ -3,9 +3,36 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"reflect"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"unicode"
 )
+
+// validateEditedManifest keeps the fetched optimistic-concurrency token and
+// identity intact. Editing content never authorizes changing the destination.
+func validateEditedManifest(original, edited string) error {
+	var before, after map[string]interface{}
+	if err := yaml.UnmarshalStrict([]byte(original), &before); err != nil {
+		return fmt.Errorf("original manifest: %w", err)
+	}
+	if err := yaml.UnmarshalStrict([]byte(edited), &after); err != nil {
+		return fmt.Errorf("edited manifest: %w", err)
+	}
+	for _, key := range []string{"apiVersion", "kind"} {
+		if !reflect.DeepEqual(before[key], after[key]) {
+			return fmt.Errorf("editor cannot change %s", key)
+		}
+	}
+	bm, _ := before["metadata"].(map[string]interface{})
+	am, _ := after["metadata"].(map[string]interface{})
+	for _, key := range []string{"name", "namespace", "uid", "resourceVersion"} {
+		if !reflect.DeepEqual(bm[key], am[key]) {
+			return fmt.Errorf("editor cannot change metadata.%s", key)
+		}
+	}
+	return nil
+}
 
 // editorCommand turns $EDITOR into an executable and argument list, then
 // appends the temporary YAML path. Quotes and escaped spaces make editor paths

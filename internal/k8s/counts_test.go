@@ -263,3 +263,27 @@ func TestBoundedWorkStopsWhenAsked(t *testing.T) {
 		t.Errorf("%d jobs ran after stop was closed", ran)
 	}
 }
+func TestForbiddenCountIsNamespaceScoped(t *testing.T) {
+	s, _ := newSpyStore(t)
+	dyn := s.c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	calls := map[string]int{}
+	dyn.PrependReactor("list", "secrets", func(a clienttesting.Action) (bool, runtime.Object, error) {
+		calls[a.GetNamespace()]++
+		if a.GetNamespace() == "a" {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", nil)
+		}
+		return false, nil, nil
+	})
+	s.RowCount("secrets", "a")
+	s.sweepCounts("a")
+	s.sweepCounts("a")
+	s.RowCount("secrets", "b")
+	s.sweepCounts("b")
+	s.sweepCounts("a")
+	if calls["a"] != 1 || calls["b"] != 1 {
+		t.Fatalf("scope requests = %v; want a=1, b=1", calls)
+	}
+	if got, ok := s.cachedCount("secrets", "b"); !ok || got != 0 {
+		t.Fatalf("authorized namespace count = %d, %v", got, ok)
+	}
+}

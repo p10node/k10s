@@ -110,10 +110,11 @@ type Model struct {
 	// lines. Scrolling it never moves the selection — the wheel is for
 	// looking around, and a kind list that reselected as it slid past would
 	// change the whole main panel by accident.
-	listScroll int
-	rowIdx     int
-	rowScroll  int
-	rowSearch  string // filters rows of the currently displayed table
+	listScroll  int
+	rowIdx      int
+	rowScroll   int
+	rowSearch   string // filters rows of the currently displayed table
+	crSelection resourceSelection
 
 	mode      mainMode
 	textTitle string
@@ -172,7 +173,6 @@ type Model struct {
 	palIdx  int
 
 	// context picker, opened by :ctx.
-	ctxOpen   bool
 	ctxIdx    int
 	ctxFilter string
 
@@ -250,10 +250,14 @@ type Model struct {
 	offline    bool
 	offlineWhy string
 
-	portFwds map[string]func()
-	logStop  func()
-	logCh    <-chan string
-	logGen   int
+	logLimits       config.Logs
+	logSession      domain.LogSession
+	portFwds        map[string]func()
+	forwardRequests map[string]int
+	forwardPending  map[string]bool // key -> a dial is in flight
+	logStop         func()
+	logCh           <-chan string
+	logGen          int
 
 	// Log viewer state. logScroll counts display rows hidden *below* the
 	// view, so 0 means pinned to the newest line.
@@ -278,6 +282,8 @@ type Model struct {
 	updLast     time.Time
 	updBusy     bool
 	relaunch    bool
+	sourceOwner *sourceLease
+	viewGen     int
 }
 
 // New builds the UI model against src (either a real k8s.Store or the
@@ -325,6 +331,7 @@ func New(src domain.Source) *Model {
 // loadConfig applies ~/.k10s/config.yaml (or $K10S_CONFIG) on startup.
 func (m *Model) loadConfig() {
 	c, err := config.Load()
+	m.logLimits = c.Logs
 	if err != nil {
 		m.toast = "config: " + err.Error()
 		return
@@ -382,7 +389,7 @@ func (m *Model) loadConfig() {
 	if !c.Onboarded {
 		m.onboarded = true
 		m.firstRun = true
-		m.saveConfig()
+		_ = m.saveConfig()
 	}
 }
 
@@ -398,6 +405,7 @@ func (m *Model) saveConfig() error {
 		ctx = m.connName
 	}
 	err := config.Save(config.Config{
+		Logs:      m.logLimits,
 		Theme:     m.th().Name,
 		Context:   ctx,
 		Namespace: m.namespace,
@@ -517,7 +525,7 @@ func (m *Model) toggleGroup(group string) {
 		m.toast = "▾ " + group
 	}
 	m.syncListScroll()
-	m.saveConfig()
+	_ = m.saveConfig()
 }
 
 // setZoomed shows or hides the side panes and remembers the choice, so the
@@ -527,7 +535,7 @@ func (m *Model) setZoomed(on bool) {
 		return
 	}
 	m.zoomed = on
-	m.saveConfig()
+	_ = m.saveConfig()
 }
 
 // listEntry is one rendered line of the Resources pane: a group header, a
@@ -556,7 +564,7 @@ func (m *Model) listEntries() []listEntry {
 			// One blank line separates groups, except between two folded
 			// ones: three headers with a gap each is more air than the two
 			// words they separate deserve.
-			if len(out) > 0 && !(prevFolded && folded) {
+			if len(out) > 0 && (!prevFolded || !folded) {
 				out = append(out, listEntry{kind: -1})
 			}
 			prevFolded = folded
@@ -663,6 +671,13 @@ func (m *Model) filtered() []int {
 // rendering, click targets — goes through this so they never disagree
 // about what's currently showing.
 func (m *Model) tableData() ([]string, [][]string) {
+	if m.curKind().Key == "customresources" {
+		if src, ok := m.src.(domain.CustomResourceSource); ok {
+			return m.customResourceTable(src)
+		}
+	} else {
+		m.crSelection = resourceSelection{}
+	}
 	cols, rows := m.src.Rows(m.curKind().Key, m.namespace)
 
 	// The Namespaces table doubles as the namespace switcher, so "all" leads
@@ -706,9 +721,12 @@ func (m *Model) nsReturnLabel() string {
 // applyNamespace switches namespace and resets the table position, since the
 // row set changes completely.
 func (m *Model) applyNamespace(ns string) {
+	if ns != m.namespace {
+		m.backToTable()
+	}
 	m.namespace = ns
 	m.rowIdx, m.rowScroll = 0, 0
-	m.saveConfig()
+	_ = m.saveConfig()
 
 	label := ns
 	if ns == domain.AllNamespaces {
@@ -742,11 +760,16 @@ func (m *Model) tableTotal() int {
 	return len(rows)
 }
 
+// rowMatches is the one row-search predicate; q is already lowercase.
+func rowMatches(row []string, q string) bool {
+	return strings.Contains(strings.ToLower(strings.Join(row, " ")), q)
+}
+
 func filterRows(rows [][]string, q string) [][]string {
 	q = strings.ToLower(q)
 	var out [][]string
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(strings.Join(row, " ")), q) {
+		if rowMatches(row, q) {
 			out = append(out, row)
 		}
 	}
@@ -914,6 +937,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case textResultMsg:
+		if msg.session != m.connGen || msg.view != m.viewGen {
+			return m, nil
+		}
 		m.busy = false
 		if msg.err != nil {
 			m.toast = "✗ " + msg.err.Error()
@@ -923,6 +949,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionResultMsg:
+		if msg.session != m.connGen {
+			return m, nil
+		}
 		m.busy = false
 		var resumeMouse tea.Cmd
 		if msg.resumeMouse {
@@ -945,30 +974,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleConnected(msg)
 
 	case ctxSwitchMsg:
+		if msg.gen != m.connGen {
+			if msg.src != nil {
+				msg.src.Close()
+			}
+			return m, nil
+		}
 		m.busy = false
 		if msg.err != nil {
 			m.toast = "✗ context " + msg.name + ": " + msg.err.Error()
 			return m, nil
 		}
-		m.src.Close()
-		m.src = msg.src
+		m.replaceSource(msg.src)
 		m.resetTrends()
 		m.namespace = m.src.DefaultNamespace()
 		m.resIdx, m.search = 0, ""
 		m.rowIdx, m.rowScroll = 0, 0
 		m.rowMem = map[string]int{}
-		m.saveConfig()
+		_ = m.saveConfig()
 		m.toast = "context → " + m.src.ClusterInfo().Context
 		return m, nil
 
 	case logStartMsg:
+		if msg.session != m.connGen || msg.view != m.viewGen {
+			if msg.stop != nil {
+				msg.stop()
+			}
+			return m, nil
+		}
 		m.busy = false
 		if errors.Is(msg.err, domain.ErrNoLogs) {
 			// Not a failure — this kind simply has no logs. Show what it
 			// does have rather than an error the user can do nothing about.
 			m.toast = "no logs for " + msg.name + " — showing describe"
+			src := m.src
 			return m, m.runFetch("describe "+msg.name, func() (string, error) {
-				return m.src.Describe(msg.kind, msg.ns, msg.name)
+				return src.Describe(msg.kind, msg.ns, msg.name)
 			})
 		}
 		if msg.err != nil {
@@ -991,7 +1032,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logScroll = 0
 		m.logFollow = true
 		m.toast = msg.title
+		m.boundLogs()
+		m.logSession = msg.logSession
 		if msg.ch == nil {
+			if msg.stop != nil {
+				msg.stop()
+			}
 			return m, nil // history only; nothing to follow
 		}
 		m.logStop = msg.stop
@@ -999,6 +1045,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitLogLine(m.logGen, m.logCh)
 
 	case shellStartMsg:
+		if msg.session != m.connGen || msg.view != m.viewGen {
+			if msg.sess != nil {
+				_ = msg.sess.Close()
+			}
+			return m, nil
+		}
 		m.busy = false
 		if errors.Is(msg.err, domain.ErrNoShell) {
 			m.toast = "no interactive shell here (offline demo, or not a pod)"
@@ -1026,23 +1078,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeShell("shell session ended")
 			return m, nil
 		}
-		m.shellTerm.Write(msg.data)
+		_, _ = m.shellTerm.Write(msg.data)
 		return m, waitShellOut(m.shellGen, m.shellSess.Output())
 
 	case logOlderMsg:
+		if msg.session != m.connGen || msg.gen != m.logGen || m.mode != modeLogs || msg.ns != m.logNS {
+			return m, nil
+		}
 		m.logLoading = false
 		if msg.err != nil || msg.kind != m.logKind || msg.name != m.logName {
 			if msg.err != nil {
 				m.toast = "✗ " + msg.err.Error()
+				// Nothing arrived, so the next request must not grow past
+				// the tail that just failed.
+				m.logTail = msg.prevTail
 			}
 			return m, nil
 		}
 		// Keep the newest lines we already have (the stream may have added
 		// some) and prepend whatever is older than our current first line.
-		if added := len(msg.lines) - len(m.textLines); added > 0 {
-			m.textLines = append(msg.lines[:added:added], m.textLines...)
+		merged, overlap := prependLogHistory(msg.lines, m.textLines)
+		m.textLines = merged
+		m.logMore = msg.more && overlap
+		if !overlap {
+			m.toast = "log history has no unambiguous overlap; reopen logs to refresh"
 		}
-		m.logMore = msg.more
+		m.boundLogs()
 		return m, nil
 
 	case logLineMsg:
@@ -1051,8 +1112,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !msg.ok {
 			m.textLines = append(m.textLines, "── stream closed")
+			m.boundLogs()
 			return m, nil
 		}
+		msg.line = truncateLogLine(msg.line, maxLogLineBytes)
 		m.textLines = append(m.textLines, msg.line)
 		// While paused, a new line arriving at the bottom would shift the
 		// view; keep the same content in place by growing the offset. The
@@ -1062,9 +1125,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.logFollow {
 			m.logScroll += m.logRows(msg.line)
 		}
+		m.boundLogs()
 		return m, waitLogLine(m.logGen, m.logCh)
 
 	case editFetchedMsg:
+		if msg.session != m.connGen || msg.view != m.viewGen {
+			if msg.path != "" {
+				_ = os.Remove(msg.path)
+			}
+			return m, nil
+		}
 		m.busy = false
 		if msg.err != nil {
 			m.toast = "✗ " + msg.err.Error()
@@ -1073,11 +1143,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c, err := editorCommand(os.Getenv("EDITOR"), msg.path)
 		if err != nil {
 			return m, func() tea.Msg {
-				return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
+				return editExitMsg{source: msg.source, original: msg.original, session: msg.session, kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 			}
 		}
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			return editExitMsg{kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
+			return editExitMsg{source: msg.source, original: msg.original, session: msg.session, kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 		})
 
 	case editExitMsg:
@@ -1087,9 +1157,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before handling the editor result. Respect copy mode: when the user
 		// deliberately disabled capture with ctrl+s, it must stay disabled.
 		resumeMouse := m.resumeMouseAfterExec()
-		defer os.Remove(msg.path)
+		if msg.session != m.connGen {
+			m.toast = "✗ session changed; reopen editor on current target. Edited file preserved: " + msg.path
+			return m, resumeMouse
+		}
 		if msg.err != nil {
-			m.toast = "✗ editor: " + msg.err.Error()
+			m.toast = "✗ editor: " + msg.err.Error() + "; edited file preserved: " + msg.path
 			return m, resumeMouse
 		}
 		data, err := os.ReadFile(msg.path)
@@ -1097,13 +1170,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = "✗ " + err.Error()
 			return m, resumeMouse
 		}
+		if msg.original != "" {
+			if err := validateEditedManifest(msg.original, string(data)); err != nil {
+				m.toast = "✗ " + err.Error() + "; edited file preserved: " + msg.path
+				return m, resumeMouse
+			}
+		}
 		kind, ns, name := msg.kind, msg.ns, msg.name
+		src := msg.source
+		if src == nil {
+			src = m.src
+		} // legacy internal callers, after session validation
 		apply := m.runAction("✓ "+name+" updated", func() error {
-			return m.src.Apply(kind, ns, name, string(data))
+			if err := src.Apply(kind, ns, name, string(data)); err != nil {
+				return fmt.Errorf("%w; edited file preserved: %s", err, msg.path)
+			}
+			return os.Remove(msg.path)
 		})
 		return m, tea.Batch(resumeMouse, apply)
 
 	case portForwardMsg:
+		if msg.session != m.connGen || msg.request != m.forwardRequests[msg.key] {
+			if msg.stop != nil {
+				msg.stop()
+			}
+			return m, nil
+		}
+		delete(m.forwardPending, msg.key)
 		m.busy = false
 		if msg.err != nil {
 			m.toast = "✗ " + msg.err.Error()
@@ -1140,11 +1233,14 @@ func (m *Model) startBusy(label string) {
 // runFetch wraps a blocking read (describe/YAML/logs/top/AI) as an async
 // tea.Cmd so the UI never blocks on network I/O.
 func (m *Model) runFetch(title string, fn func() (string, error)) tea.Cmd {
+	m.backToTable()
+	session, view, release := m.connGen, m.viewGen, m.leaseSource()
 	m.toast = "… " + title
 	m.startBusy(title)
 	return func() tea.Msg {
 		body, err := fn()
-		return textResultMsg{title: title, body: body, err: err}
+		release()
+		return textResultMsg{session: session, view: view, title: title, body: body, err: err}
 	}
 }
 
@@ -1152,9 +1248,11 @@ func (m *Model) runFetch(title string, fn func() (string, error)) tea.Cmd {
 // drain/apply) as an async tea.Cmd.
 func (m *Model) runAction(okToast string, fn func() error) tea.Cmd {
 	m.startBusy(strings.TrimPrefix(okToast, "✓ "))
+	release, session := m.leaseSource(), m.connGen
 	return func() tea.Msg {
+		defer release()
 		err := fn()
-		return actionResultMsg{toast: okToast, err: err}
+		return actionResultMsg{session: session, toast: okToast, err: err}
 	}
 }
 
@@ -1172,11 +1270,15 @@ func (m *Model) switchContextCmd(name string) tea.Cmd {
 		return m.connectCmd(name)
 	}
 	m.toast = "… switching context"
+	m.invalidateSession()
+	m.connGen++
 	m.startBusy("connecting to " + name)
 	src := m.src
+	gen, release := m.connGen, m.leaseSource()
 	return func() tea.Msg {
+		defer release()
 		ns, err := src.SwitchContext(name)
-		return ctxSwitchMsg{name: name, src: ns, err: err}
+		return ctxSwitchMsg{gen: gen, name: name, src: ns, err: err}
 	}
 }
 
@@ -1474,11 +1576,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "T":
 		m.themeIdx = (m.themeIdx + 1) % len(m.themes)
 		m.toast = "theme → " + m.th().Name
-		m.saveConfig()
+		_ = m.saveConfig()
 	case "ctrl+t":
 		m.themeIdx = (m.themeIdx - 1 + len(m.themes)) % len(m.themes)
 		m.toast = "theme → " + m.th().Name
-		m.saveConfig()
+		_ = m.saveConfig()
 	case "z":
 		m.setZoomed(!m.zoomed)
 		m.toast = map[bool]string{true: "zoomed", false: "restored"}[m.zoomed]
@@ -1930,6 +2032,12 @@ func (m *Model) selectResource(i int) {
 // appending lines nobody can see, and a shell left open keeps the pod's
 // exec alive until something else happens to close it.
 func (m *Model) backToTable() {
+	m.logGen++
+	m.logLoading = false
+	m.logCh = nil
+	m.logSession = nil
+	m.viewGen++
+	m.busy = false
 	if m.logStop != nil {
 		m.logStop()
 		m.logStop = nil
@@ -1953,6 +2061,7 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 	name := m.curName()
 	kind := r.Key
 	ns := m.curNamespace()
+	session := m.connGen
 
 	if !r.Can(a.ID) {
 		m.toast = fmt.Sprintf("✗ %s is not available for %s", a.Label, r.Name)
@@ -1966,15 +2075,20 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 		m.toast = "✗ nothing selected"
 		return nil
 	}
+	src, err := m.selectedActionSource(kind)
+	if err != nil {
+		m.toast = "✗ " + err.Error()
+		return nil
+	}
 
 	switch a.ID {
 	case domain.ADescribe:
 		return m.runFetch("describe "+r.Short+"/"+name, func() (string, error) {
-			return m.src.Describe(kind, ns, name)
+			return src.Describe(kind, ns, name)
 		})
 	case domain.AYAML:
 		return m.runFetch("yaml "+r.Short+"/"+name, func() (string, error) {
-			return m.src.YAML(kind, ns, name)
+			return src.YAML(kind, ns, name)
 		})
 	case domain.ALogs:
 		return m.startLogs(kind, ns, name)
@@ -1983,8 +2097,12 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 			title:   "Rollout restart",
 			message: []string{"Restart every pod of", r.Short + "/" + name + " ?", "", "Rolling update — zero downtime with 2+ replicas."},
 			onOK: func(mm *Model) tea.Cmd {
+				if session != mm.connGen {
+					mm.toast = "✗ session changed; confirm on current target"
+					return nil
+				}
 				return mm.runAction("✓ "+r.Short+"/"+name+" restarted", func() error {
-					return mm.src.Restart(kind, ns, name)
+					return src.Restart(kind, ns, name)
 				})
 			},
 		}
@@ -1994,8 +2112,12 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 			danger:  true,
 			message: []string{"Permanently delete", r.Short + "/" + name, "namespace: " + ns, "", "This action CANNOT be undone."},
 			onOK: func(mm *Model) tea.Cmd {
+				if session != mm.connGen {
+					mm.toast = "✗ session changed; confirm on current target"
+					return nil
+				}
 				return mm.runAction("✓ "+r.Short+"/"+name+" deleted", func() error {
-					return mm.src.Delete(kind, ns, name)
+					return src.Delete(kind, ns, name)
 				})
 			},
 		}
@@ -2024,9 +2146,9 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 		return m.input.Focus()
 	case domain.ATop:
 		if kind == "nodes" {
-			return m.runFetch("top no/"+name, func() (string, error) { return m.src.TopNode(name) })
+			return m.runFetch("top no/"+name, func() (string, error) { return src.TopNode(name) })
 		}
-		return m.runFetch("top po/"+name, func() (string, error) { return m.src.TopPod(ns, name) })
+		return m.runFetch("top po/"+name, func() (string, error) { return src.TopPod(ns, name) })
 	case domain.ACordon:
 		cordoned := strings.Contains(rowStatus(m), "SchedulingDisabled")
 		disable := !cordoned
@@ -2035,7 +2157,7 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 			verb = "uncordoned"
 		}
 		return m.runAction(fmt.Sprintf("✓ node/%s %s", name, verb), func() error {
-			return m.src.Cordon(name, disable)
+			return src.Cordon(name, disable)
 		})
 	case domain.ADrain:
 		m.confirm = &confirmState{
@@ -2045,10 +2167,15 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 				"Cordon and evict all pods from", "no/" + name, "",
 				"Pods are rescheduled onto other nodes.",
 				"DaemonSet-managed pods are not evicted.",
+				"emptyDir data on evicted pods is discarded.",
 			},
 			onOK: func(mm *Model) tea.Cmd {
+				if session != mm.connGen {
+					mm.toast = "✗ session changed; confirm on current target"
+					return nil
+				}
 				return mm.runAction("✓ node/"+name+" drained", func() error {
-					return mm.src.Drain(name)
+					return src.Drain(name)
 				})
 			},
 		}
@@ -2069,30 +2196,45 @@ func rowStatus(m *Model) string {
 }
 
 func (m *Model) startLogs(kind, ns, name string) tea.Cmd {
+	m.backToTable()
+	session, view, release := m.connGen, m.viewGen, m.leaseSource()
 	// No busy spinner here: the log view opens already scrolled to the
 	// newest line, and flashing a spinner first made entering logs look
 	// like it jumped. The status line inside the viewer covers the wait.
 	m.toast = "… loading logs"
 	src := m.src
 	return func() tea.Msg {
+		if opener, ok := src.(domain.LogOpener); ok {
+			pinned, err := opener.OpenLogSession(kind, ns, name, logInitial)
+			if err != nil {
+				release()
+				return logStartMsg{session: session, view: view, kind: kind, ns: ns, name: name, err: err}
+			}
+			return logStartMsg{session: session, view: view, kind: kind, ns: ns, name: name, title: "logs -f " + name, more: true, ch: pinned.Lines(), stop: leasedStop(pinned.Close, release), logSession: pinned}
+		}
 		// Load a page of history first so the view opens with content, then
 		// attach the follow stream on top of it.
 		lines, more, err := src.LogsTail(kind, ns, name, logInitial)
 		if err != nil {
-			return logStartMsg{kind: kind, ns: ns, name: name, err: err}
+			release()
+			return logStartMsg{session: session, view: view, kind: kind, ns: ns, name: name, err: err}
 		}
 		ch, stop, ferr := src.LogsFollow(kind, ns, name)
 		if ferr != nil {
+			if stop != nil {
+				stop()
+			}
+			release()
 			// History is still worth showing even if following failed.
 			return logStartMsg{
-				kind: kind, ns: ns, name: name,
+				session: session, view: view, kind: kind, ns: ns, name: name,
 				title: "logs " + name, lines: lines, more: more,
 			}
 		}
 		return logStartMsg{
-			kind: kind, ns: ns, name: name,
+			session: session, view: view, kind: kind, ns: ns, name: name,
 			title: "logs -f " + name, lines: lines, more: more,
-			ch: ch, stop: stop,
+			ch: ch, stop: leasedStop(stop, release),
 		}
 	}
 }
@@ -2110,44 +2252,60 @@ func (m *Model) maybeLoadOlder() tea.Cmd {
 // at the top. The Kubernetes API has no backwards cursor, so re-reading with
 // a bigger tail is the only way to reach older entries.
 func (m *Model) loadOlderLogs() tea.Cmd {
-	if m.logLoading || !m.logMore {
+	if m.logLoading || !m.logMore || len(m.textLines) == 0 {
 		return nil
 	}
 	m.logLoading = true
+	session, gen, release := m.connGen, m.logGen, m.leaseSource()
 	src := m.src
+	pinned := m.logSession
 	kind, ns, name := m.logKind, m.logNS, m.logName
-	want := m.logTail + logChunk
+	maxLines, _ := m.logLimits.Limits()
+	prev := m.logTail
+	want := min(prev+logChunk, maxLines)
 	m.logTail = want
 
 	return func() tea.Msg {
-		lines, more, err := src.LogsTail(kind, ns, name, want)
-		return logOlderMsg{kind: kind, ns: ns, name: name, lines: lines, more: more, err: err}
+		defer release()
+		var lines []string
+		var more bool
+		var err error
+		if pinned != nil {
+			lines, more, err = pinned.History(want)
+		} else {
+			lines, more, err = src.LogsTail(kind, ns, name, want)
+		}
+		return logOlderMsg{session: session, gen: gen, kind: kind, ns: ns, name: name, lines: lines, more: more, err: err, prevTail: prev}
 	}
-}
-
-func (m *Model) startShell(kind, ns, name string) tea.Cmd {
-	cmd, err := m.src.Shell(kind, ns, name)
-	if err != nil {
-		m.toast = "✗ " + err.Error()
-		return nil
-	}
-	if cmd == nil {
-		m.toast = "⟩ " + m.cli + " exec -it " + name + " -- /bin/sh (not supported here)"
-		return nil
-	}
-	return tea.Exec(cmd, func(err error) tea.Msg {
-		return actionResultMsg{toast: "✓ shell session closed", err: err, resumeMouse: true}
-	})
 }
 
 func (m *Model) startPortForward(kind, ns, name string) tea.Cmd {
 	key := kind + "/" + ns + "/" + name
+	if m.forwardRequests == nil {
+		m.forwardRequests = map[string]int{}
+	}
+	if m.forwardPending == nil {
+		m.forwardPending = map[string]bool{}
+	}
+	m.forwardRequests[key]++
+	request := m.forwardRequests[key]
+	if m.forwardPending[key] {
+		// A second press while the dial is in flight cancels it: the bumped
+		// request number orphans that result, which is stopped and released
+		// when it lands, instead of opening a second tunnel.
+		delete(m.forwardPending, key)
+		m.busy = false
+		m.toast = "✗ port-forward " + key + " cancelled"
+		return nil
+	}
 	if stop, ok := m.portFwds[key]; ok && stop != nil {
 		stop()
 		delete(m.portFwds, key)
 		m.toast = "✓ port-forward " + key + " stopped"
 		return nil
 	}
+	session, release := m.connGen, m.leaseSource()
+	m.forwardPending[key] = true
 	m.toast = "… starting port-forward"
 	m.startBusy("port-forward " + name)
 	src := m.src
@@ -2156,28 +2314,47 @@ func (m *Model) startPortForward(kind, ns, name string) tea.Cmd {
 		if err == nil && addr == "" && stop == nil {
 			err = fmt.Errorf("port-forward is not supported here")
 		}
-		return portForwardMsg{key: key, addr: addr, stop: stop, err: err}
+		if err != nil {
+			if stop != nil {
+				stop()
+			}
+			release()
+			stop = nil
+		} else {
+			stop = leasedStop(stop, release)
+		}
+		return portForwardMsg{request: request, session: session, key: key, addr: addr, stop: stop, err: err}
 	}
 }
 
 func (m *Model) startEdit(kind, ns, name string) tea.Cmd {
+	m.backToTable()
+	session, view, release := m.connGen, m.viewGen, m.leaseSource()
 	m.toast = "… opening $EDITOR for " + name
 	m.startBusy("opening $EDITOR")
-	src := m.src
+	src, err := m.selectedActionSource(kind)
+	if err != nil {
+		m.busy = false
+		release()
+		m.toast = "✗ " + err.Error()
+		return nil
+	}
 	return func() tea.Msg {
+		defer release()
 		body, err := src.YAML(kind, ns, name)
 		if err != nil {
-			return editFetchedMsg{err: err}
+			return editFetchedMsg{session: session, view: view, err: err}
 		}
 		f, err := os.CreateTemp("", "k10s-edit-*.yaml")
 		if err != nil {
-			return editFetchedMsg{err: err}
+			return editFetchedMsg{session: session, view: view, err: err}
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		if _, err := f.WriteString(body); err != nil {
-			return editFetchedMsg{err: err}
+			_ = os.Remove(f.Name())
+			return editFetchedMsg{session: session, view: view, err: err}
 		}
-		return editFetchedMsg{kind: kind, ns: ns, name: name, path: f.Name()}
+		return editFetchedMsg{source: src, original: body, session: session, view: view, kind: kind, ns: ns, name: name, path: f.Name()}
 	}
 }
 
@@ -2227,6 +2404,8 @@ func (m *Model) runCommand(cmd string) tea.Cmd {
 }
 
 func (m *Model) askAI(prompt string) tea.Cmd {
+	m.backToTable()
+	session, view := m.connGen, m.viewGen
 	m.startBusy("asking " + m.cfg.model)
 	cfg := ai.Config{
 		Provider: []string{"openai", "anthropic"}[m.cfg.provider],
@@ -2244,7 +2423,7 @@ func (m *Model) askAI(prompt string) tea.Cmd {
 	m.toast = "… asking " + m.cfg.model
 	return func() tea.Msg {
 		body, err := ai.Ask(context.Background(), cfg, cc, prompt)
-		return textResultMsg{title: title, body: body, err: err}
+		return textResultMsg{session: session, view: view, title: title, body: body, err: err}
 	}
 }
 
@@ -2308,9 +2487,10 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 			return nil
 		}
 		kind, ns, rname := m.curKind().Key, m.curNamespace(), m.curName()
+		src := m.src
 		m.closePrompt()
 		return m.runAction(fmt.Sprintf("✓ %s scaled to %d", rname, n), func() error {
-			_, err := m.src.Scale(kind, ns, rname, n)
+			_, err := src.Scale(kind, ns, rname, n)
 			return err
 		})
 	case ":search":
@@ -2364,7 +2544,7 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 func (m *Model) gotoKind(key, arg string) {
 	// ":ns" alone is the namespace switcher, the same one the header button
 	// opens; ":ns <name>" skips the picking and switches outright,
-	// leaving you on whatever view you were already reading.
+	// returning to the table so old-namespace views cannot remain active.
 	if key == "namespaces" {
 		if arg == "" {
 			m.showNamespaceChooser()
@@ -2423,7 +2603,7 @@ func (m *Model) revealGroup(kindIdx int) {
 		return
 	}
 	m.collapsed[ks[kindIdx].Group] = false
-	m.saveConfig()
+	_ = m.saveConfig()
 }
 
 // commandSet is what a prefix offers. The ":" set is built per call because

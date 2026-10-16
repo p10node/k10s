@@ -25,6 +25,9 @@ clis: "kubectl,k8s,k"
 onboarded: true
 collapsed: "Config,Storage,RBAC"
 zoomed: false
+logs:
+  max_lines: 5000
+  max_bytes: 4194304
 ai:
   provider: "anthropic"
   base_url: "https://api.anthropic.com/v1"
@@ -39,7 +42,7 @@ update:
 
 Written with a hand-rolled flat-YAML reader/writer (`render`/`parse` in
 `internal/config/config.go`) — the format is simple enough (top-level scalars
-plus the nested `ai:` and `update:` blocks, all double-quoted) that pulling
+plus the nested `logs:`, `ai:` and `update:` blocks) that pulling
 in a YAML library isn't worth it. Values round-trip through Go string quoting only;
 nothing fancier (lists, multi-line, anchors) is needed or supported.
 
@@ -56,6 +59,24 @@ those defaults, which is what makes the first run after an upgrade sensible.
 `zoomed` records whether the main pane was zoomed (side panes hidden) so the
 layout comes back the same way on the next launch. A file without the key
 opens unzoomed.
+
+## Log retention
+
+`logs.max_lines` and `logs.max_bytes` cap retained log text. Missing, zero,
+negative or out-of-range values use 5,000 lines / 4 MiB. Supported positive
+limits are at most 100,000 lines / 64 MiB. Individual retained lines are
+truncated to 64 KiB; the backend reads a line of up to 1 MiB before that
+truncation, and a longer one ends the stream with a visible error. These are
+payload bounds, not a total-process RSS limit.
+At the cap, older history stops expanding; incoming lines evict the oldest
+retained entries. Log history responses are also bounded by the backend.
+
+## AI availability
+
+AI is disabled in this build (`internal/ui/aidisabled.go`). The `ai:` keys
+are retained for compatibility, not a supported setup workflow. The AI
+settings controls are unavailable and `ctrl+a` displays a notice. The legacy
+provider details below describe persisted schema, not active functionality.
 
 ## When it saves
 

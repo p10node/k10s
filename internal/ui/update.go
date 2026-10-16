@@ -83,7 +83,10 @@ func (m *Model) skipRelease() tea.Cmd {
 		return nil
 	}
 	m.updSkip = m.updRel.Version
-	m.saveConfig()
+	if err := m.saveConfig(); err != nil {
+		m.toast = "save update settings: " + err.Error()
+		return nil
+	}
 	m.toast = "skipping k10s " + m.updSkip + " — /update still installs it on demand"
 	return nil
 }
@@ -101,19 +104,17 @@ func (m *Model) offerUpdate(rel *update.Release) tea.Cmd {
 		return nil
 	}
 
+	if rel.Sums.URL == "" {
+		m.toast = "✗ release has no checksum manifest — refusing to install unverified"
+		return nil
+	}
 	msg := []string{
 		"Install k10s " + rel.Version + " over " + cur + " ?",
 		"",
 		"from   " + m.updateClient().Repository(),
 		"file   " + rel.Asset.Name + "  " + humanBytes(rel.Asset.Size),
 	}
-	if rel.Sums.Name == "" {
-		// Worth saying out loud: without a manifest there is nothing to
-		// check the download against.
-		msg = append(msg, "sums   none published — installed unverified")
-	} else {
-		msg = append(msg, "sums   verified against "+rel.Sums.Name)
-	}
+	msg = append(msg, "sums   must match "+rel.Sums.Name+" before install")
 	if notes := releaseNotes(rel.Notes, 6); len(notes) > 0 {
 		msg = append(msg, "")
 		msg = append(msg, notes...)
@@ -161,7 +162,12 @@ func (m *Model) handleUpdateCheck(msg updateCheckMsg) tea.Cmd {
 	}
 	m.updRel = msg.rel
 	m.updLast = time.Now()
-	m.saveConfig()
+	// Keep the update result usable even if persisting the check timestamp fails.
+	defer func() {
+		if err := m.saveConfig(); err != nil {
+			m.toast = "save update settings: " + err.Error()
+		}
+	}()
 
 	if !msg.auto {
 		return m.offerUpdate(msg.rel)
@@ -190,8 +196,10 @@ func (m *Model) handleUpdateApplied(msg updateAppliedMsg) tea.Cmd {
 		m.updSkip = ""
 	}
 	m.updLast = time.Time{} // the next launch re-checks against the new version
-	m.saveConfig()
 	m.toast = "✓ k10s " + msg.version + " installed"
+	if err := m.saveConfig(); err != nil {
+		m.toast += "; save update settings: " + err.Error()
+	}
 	m.confirm = &confirmState{
 		title: "Restart into k10s " + msg.version,
 		message: []string{
@@ -216,7 +224,10 @@ func (m *Model) Relaunch() bool { return m.relaunch }
 // setUpdateChecks turns the startup check on or off and persists it.
 func (m *Model) setUpdateChecks(on bool) {
 	m.updDisabled = !on
-	m.saveConfig()
+	if err := m.saveConfig(); err != nil {
+		m.toast = "save update settings: " + err.Error()
+		return
+	}
 	if on {
 		m.toast = "update check → on (once a day at startup)"
 	} else {

@@ -54,7 +54,9 @@ func TestSilenceLoggingKeepsStderrClean(t *testing.T) {
 	s.Close()
 
 	os.Stderr = orig
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
 	out, _ := io.ReadAll(r)
 
 	for _, noise := range []string{"Failed to watch", "reflector", "UnhandledError"} {

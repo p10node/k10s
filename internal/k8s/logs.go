@@ -17,7 +17,9 @@ import (
 
 func (s *Store) podContainer(ns, name string) (string, error) {
 	ens := effectiveNS(ns)
-	p, err := s.podLister(ens).Pods(ens).Get(name)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p, err := s.c.Clientset.CoreV1().Pods(ens).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -45,8 +47,14 @@ func (s *Store) logTarget(kind, ns, name string) (pod, container string, err err
 		if err != nil {
 			return "", "", err
 		}
-		pods, err := s.podLister(ens).Pods(ens).List(sel)
-		if err != nil || len(pods) == 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		list, err := s.c.Clientset.CoreV1().Pods(ens).List(ctx, metav1.ListOptions{LabelSelector: sel.String()})
+		if err != nil {
+			return "", "", err
+		}
+		pods := list.Items
+		if len(pods) == 0 {
 			return "", "", fmt.Errorf("no running pods found for %s/%s", kind, name)
 		}
 		// Prefer a running pod; a crash-looping one still has logs worth
@@ -70,34 +78,36 @@ func (s *Store) logTarget(kind, ns, name string) (pod, container string, err err
 // workloadSelector reads the label selector off a workload so its pods can
 // be found.
 func (s *Store) workloadSelector(kind, ns, name string) (labels.Selector, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var m *metav1.LabelSelector
 	switch kind {
 	case kDeployments:
-		d, err := s.deployLister(ns).Deployments(ns).Get(name)
+		d, err := s.c.Clientset.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kStatefulSet:
-		d, err := s.stsLister(ns).StatefulSets(ns).Get(name)
+		d, err := s.c.Clientset.AppsV1().StatefulSets(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kDaemonSets:
-		d, err := s.dsLister(ns).DaemonSets(ns).Get(name)
+		d, err := s.c.Clientset.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kJobs:
-		d, err := s.jobLister(ns).Jobs(ns).Get(name)
+		d, err := s.c.Clientset.BatchV1().Jobs(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		m = d.Spec.Selector
 	case kReplicaSets:
-		d, err := s.rsLister(ns).ReplicaSets(ns).Get(name)
+		d, err := s.c.Clientset.AppsV1().ReplicaSets(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +194,8 @@ func (s *Store) LogsFollow(kind, ns, name string) (<-chan string, func(), error)
 	lines := make(chan string, 256)
 	go func() {
 		defer close(lines)
-		defer stream.Close()
+		// Stream read/cancellation determines the result; closing is best-effort cleanup.
+		defer func() { _ = stream.Close() }()
 		sc := bufio.NewScanner(stream)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {

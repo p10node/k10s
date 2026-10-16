@@ -12,7 +12,6 @@ import (
 	apiextclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,12 +38,17 @@ type Store struct {
 
 	// infMu guards started: which kinds have a running informer. Informers
 	// are started lazily, per kind, the first time that kind is displayed.
-	// loadErr retains the latest LIST/WATCH failure for an informer that has
-	// not completed its first list, so the UI can distinguish Forbidden from
-	// a request that is merely still in flight.
-	infMu   sync.Mutex
-	started map[informerKey]bool
-	loadErr map[informerKey]error
+	// health tracks current LIST/WATCH failures independently of initial sync.
+	// Namespace factories are an LRU bounded by maxNamespaceScopes.
+	infMu      sync.Mutex
+	started    map[informerKey]bool
+	scopeStops map[string]chan struct{}
+	scopeUsed  map[string]uint64
+	scopeClock uint64
+	closed     bool
+	closeOnce  sync.Once
+	scopeWG    sync.WaitGroup
+	health     map[informerKey]*watchHealth
 
 	mu          sync.RWMutex
 	podMetrics  map[string]metricSample // "ns/name" -> cpu/mem
@@ -53,11 +57,15 @@ type Store struct {
 	// Custom resources have no informer (their GVRs are only known at
 	// runtime), so they're swept on a background timer instead. crCache is
 	// the only thing the render path ever reads.
-	crMu      sync.Mutex
-	crCache   []nsRow
-	crAt      time.Time
-	crRunning bool
-	crErr     error
+	crRefs       []domain.ResourceRef // parallel to crCache; published under crMu
+	crMu         sync.Mutex
+	crCache      []nsRow
+	crAt         time.Time
+	crRunning    bool
+	crErr        error
+	crNS         string // selected namespace; only this bounded cache is retained
+	crGeneration uint64
+	crKick       chan struct{}
 
 	// Sidebar badge counts for kinds whose informer isn't running, refreshed
 	// off-thread so the sidebar can show a number without opening a watch.
@@ -119,11 +127,14 @@ func newStoreFrom(c *Client, apiext apiextclientset.Interface) (*Store, error) {
 		apiextFactory:       apiextinformers.NewSharedInformerFactory(apiext, 0),
 		stop:                make(chan struct{}),
 		started:             map[informerKey]bool{},
-		loadErr:             map[informerKey]error{},
+		scopeStops:          map[string]chan struct{}{},
+		scopeUsed:           map[string]uint64{},
+		health:              map[informerKey]*watchHealth{},
 		podMetrics:          map[string]metricSample{},
 		nodeMetrics:         map[string]metricSample{},
 		cnt:                 map[string]int{},
 		cntKick:             make(chan struct{}, 1),
+		crKick:              make(chan struct{}, 1),
 		cntWant:             map[string]time.Time{},
 		cntGone:             map[string]time.Time{},
 	}
@@ -270,12 +281,14 @@ func (s *Store) accessScopeLocked(kind, desired string) string {
 }
 
 func (s *Store) factoryLocked(namespace string) informers.SharedInformerFactory {
-	if namespace == metav1.NamespaceAll {
+	if namespace == metav1.NamespaceAll || s.closed {
 		return s.factory
 	}
 	if factory := s.namespacedFactories[namespace]; factory != nil {
 		return factory
 	}
+	s.makeScopeRoomLocked()
+	s.scopeStops[namespace] = make(chan struct{})
 	factory := informers.NewSharedInformerFactoryWithOptions(s.c.Clientset, 0, informers.WithNamespace(namespace))
 	s.namespacedFactories[namespace] = factory
 	return factory
@@ -288,31 +301,42 @@ func (s *Store) factoryLocked(namespace string) informers.SharedInformerFactory 
 func (s *Store) ensure(kind string, ns ...string) {
 	s.infMu.Lock()
 	defer s.infMu.Unlock()
+	s.ensureLocked(kind, ns...)
+}
+
+func (s *Store) ensureLocked(kind string, ns ...string) {
+	if s.closed {
+		return
+	}
 	desired := s.desiredInformerScope(kind, ns)
 	scope := s.accessScopeLocked(kind, desired)
+	if scope != "" {
+		s.scopeClock++
+		s.scopeUsed[scope] = s.scopeClock
+	}
 	key := informerKey{kind: kind, namespace: scope}
 	if s.started[key] {
 		return
 	}
 	factory := s.factoryLocked(scope)
+	s.registerHealth(factory, key)
 	inf := register(factory, s.apiextFactory, kind)
 	if inf == nil {
 		return
 	}
-	// Reflector sends both initial LIST failures and later WATCH failures to
-	// this handler. It must be installed before Start; client-go rejects a
-	// handler change after the informer is running.
-	_ = inf.SetWatchErrorHandler(func(_ *cache.Reflector, err error) {
-		s.infMu.Lock()
-		s.loadErr[key] = err
-		s.infMu.Unlock()
-	})
+	// LIST/WATCH wrappers capture failures and recovery, including errors the
+	// reflector handles internally. Avoid duplicate logging here.
+	_ = inf.SetWatchErrorHandler(func(_ *cache.Reflector, _ error) {})
 	s.started[key] = true
 	// Start is idempotent and launches only newly-registered informers.
 	if kind == kCRDs {
 		s.apiextFactory.Start(s.stop)
 	} else {
-		factory.Start(s.stop)
+		stop := s.stop
+		if scope != "" {
+			stop = s.scopeStops[scope]
+		}
+		factory.Start(stop)
 	}
 }
 
@@ -340,7 +364,7 @@ func (s *Store) SyncedFor(kind, ns string) bool {
 	if kind == "customresources" {
 		s.crMu.Lock()
 		defer s.crMu.Unlock()
-		return !s.crAt.IsZero()
+		return s.crNS == ns && !s.crAt.IsZero()
 	}
 
 	s.infMu.Lock()
@@ -353,21 +377,20 @@ func (s *Store) SyncedFor(kind, ns string) bool {
 	factory := s.factoryLocked(scope)
 	inf := register(factory, s.apiextFactory, kind)
 	synced := inf != nil && inf.HasSynced()
-	if synced {
-		// HasSynced means the informer recovered and completed an authoritative
-		// list. Do not leave an earlier transient error stuck on screen.
-		delete(s.loadErr, informerKey{kind: kind, namespace: scope})
-	}
+
 	return synced
 }
 
-// LoadErrorFor reports why the selected kind/scope has not completed its
-// first load. It is deliberately an optional Source capability: the in-memory
+// LoadErrorFor reports initial load errors or degraded watches after sync.
+// It is deliberately an optional Source capability: the in-memory
 // demo has no asynchronous list/watch and therefore no load error to expose.
 func (s *Store) LoadErrorFor(kind, ns string) error {
 	if kind == "customresources" {
 		s.crMu.Lock()
 		defer s.crMu.Unlock()
+		if s.crNS != ns {
+			return nil
+		}
 		return s.crErr
 	}
 
@@ -379,20 +402,18 @@ func (s *Store) LoadErrorFor(kind, ns string) error {
 	if !s.started[key] {
 		return nil
 	}
-	inf := register(s.factoryLocked(scope), s.apiextFactory, kind)
-	if inf != nil && inf.HasSynced() {
-		delete(s.loadErr, key)
-		return nil
+	if h := s.health[key]; h != nil {
+		return h.get()
 	}
-	return s.loadErr[key]
+	return nil
 }
 
 // factoryFor returns the informer factory serving kind in the requested
 // namespace, starting that scoped informer lazily if needed.
 func (s *Store) factoryFor(kind string, ns ...string) informers.SharedInformerFactory {
-	s.ensure(kind, ns...)
 	s.infMu.Lock()
 	defer s.infMu.Unlock()
+	s.ensureLocked(kind, ns...)
 	desired := s.desiredInformerScope(kind, ns)
 	scope := s.accessScopeLocked(kind, desired)
 	return s.factoryLocked(scope)
@@ -601,7 +622,18 @@ func (s *Store) SwitchContext(name string) (domain.Source, error) {
 }
 
 func (s *Store) Close() {
-	close(s.stop)
+	s.closeOnce.Do(func() {
+		s.infMu.Lock()
+		s.closed = true
+		close(s.stop)
+		for ns := range s.namespacedFactories {
+			s.evictScopeLocked(ns)
+		}
+		s.infMu.Unlock()
+		s.factory.Shutdown()
+		s.apiextFactory.Shutdown()
+		s.scopeWG.Wait()
+	})
 }
 
 // gvrFor resolves the GroupVersionResource for a builtin kind key or a CRD
@@ -683,14 +715,6 @@ func decodeCRGVR(s string) (schema.GroupVersionResource, bool, bool) {
 	return schema.GroupVersionResource{Group: parts[1], Version: parts[2], Resource: parts[3]}, parts[4] == "1", true
 }
 
-func encodeCRGVR(gvr schema.GroupVersionResource, namespaced bool) string {
-	n := "0"
-	if namespaced {
-		n = "1"
-	}
-	return strings.Join([]string{"cr", gvr.Group, gvr.Version, gvr.Resource, n}, "|")
-}
-
 func servedStorageVersion(crd *apiextv1.CustomResourceDefinition) string {
 	for _, v := range crd.Spec.Versions {
 		if v.Storage {
@@ -702,7 +726,5 @@ func servedStorageVersion(crd *apiextv1.CustomResourceDefinition) string {
 	}
 	return ""
 }
-
-func quantityMi(q resource.Quantity) int64 { return q.Value() / (1024 * 1024) }
 
 var _ = cache.MetaNamespaceKeyFunc

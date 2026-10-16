@@ -133,19 +133,18 @@ func TestUpdateRefusesAReleaseWithNoBuildForThisPlatform(t *testing.T) {
 	}
 }
 
-func TestUpdateWarnsWhenThereIsNoChecksumToVerifyAgainst(t *testing.T) {
-	m := updateModel(t)
-
-	rel := newerRelease()
-	rel.Sums = update.Asset{}
-	m.Update(updateCheckMsg{rel: rel, newer: true, auto: false})
-
-	if m.confirm == nil {
-		t.Fatal("no confirmation dialog")
-	}
-	body := strings.Join(m.confirm.message, "\n")
-	if !strings.Contains(body, "unverified") {
-		t.Errorf("confirm body = %q, want it to say the download is unverified", body)
+func TestUpdateRefusesWhenThereIsNoChecksumToVerifyAgainst(t *testing.T) {
+	for _, sums := range []update.Asset{{}, {Name: "checksums.txt"}} {
+		m := updateModel(t)
+		rel := newerRelease()
+		rel.Sums = sums
+		m.Update(updateCheckMsg{rel: rel, newer: true, auto: false})
+		if m.confirm != nil {
+			t.Error("offered to install without a checksum manifest URL")
+		}
+		if !strings.Contains(m.toast, "checksum") {
+			t.Errorf("missing checksum refusal: %q", m.toast)
+		}
 	}
 }
 

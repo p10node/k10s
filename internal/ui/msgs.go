@@ -32,14 +32,16 @@ type tickMsg struct{}
 
 // textResultMsg lands after an async describe/YAML/logs/top/AI fetch.
 type textResultMsg struct {
-	title string
-	body  string
-	err   error
+	session, view int
+	title         string
+	body          string
+	err           error
 }
 
 // actionResultMsg lands after an async mutating call (delete, restart,
 // scale, cordon, drain, apply), or after an external terminal command.
 type actionResultMsg struct {
+	session     int
 	toast       string
 	err         error
 	resumeMouse bool
@@ -58,6 +60,7 @@ type srcConnectedMsg struct {
 // ctxSwitchMsg lands after switching kube context, which for the real
 // backend rebuilds the whole client + informer cache.
 type ctxSwitchMsg struct {
+	gen  int
 	name string
 	src  domain.Source
 	err  error
@@ -67,6 +70,8 @@ type ctxSwitchMsg struct {
 // logs; a nil ch (no error) means "not supported here" — fall back to a
 // snapshot.
 type logStartMsg struct {
+	logSession     domain.LogSession
+	session, view  int
 	kind, ns, name string
 	title          string
 	lines          []string // the history page the view opens with
@@ -87,6 +92,7 @@ type logLineMsg struct {
 
 // shellStartMsg lands after opening (or failing to open) an in-panel shell.
 type shellStartMsg struct {
+	session, view  int
 	kind, ns, name string
 	sess           domain.ShellSession
 	cols, rows     int
@@ -95,6 +101,8 @@ type shellStartMsg struct {
 
 // logOlderMsg lands after fetching an older page of the log.
 type logOlderMsg struct {
+	session, gen   int
+	prevTail       int
 	kind, ns, name string
 	lines          []string
 	more           bool
@@ -103,18 +111,26 @@ type logOlderMsg struct {
 
 // editFetchedMsg lands after fetching YAML to seed the $EDITOR flow.
 type editFetchedMsg struct {
+	source               domain.Source
+	session, view        int
 	kind, ns, name, path string
+	original             string
 	err                  error
 }
 
 // editExitMsg lands after $EDITOR exits.
 type editExitMsg struct {
+	source               domain.Source
+	session              int
 	kind, ns, name, path string
+	original             string
 	err                  error
 }
 
 // portForwardMsg lands after a port-forward session is up (or failed).
 type portForwardMsg struct {
+	request   int
+	session   int
 	key, addr string
 	stop      func()
 	err       error

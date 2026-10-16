@@ -105,6 +105,13 @@ Table data comes from client-go informers, which keep a local cache warm off
 a watch. Informers are started **lazily, per kind** — see
 [performance.md](performance.md).
 
+Each informer also reports watch health, separately from whether its first
+list ever completed. A LIST or WATCH error degrades it at once; a watch the
+server closes degrades it only if the reflector has not re-established one
+within a short grace period, so the routine expiry every few minutes never
+flashes an error. A close the reflector asked for itself, or shutdown, is not
+a disconnect. A successful re-establishment clears the error.
+
 Adding a kind means touching five places, all of them switch-shaped so a
 missing one fails loudly: `kinds.go` (entry, columns, allowed actions),
 `store.go` (informer registration + its GroupVersionResource, which is what
@@ -143,7 +150,9 @@ and custom resources. `YAML` goes through the dynamic client and strips
   Workloads (Deployment, StatefulSet, DaemonSet, Job, ReplicaSet) resolve to
   one of their pods via the workload's label selector, preferring a running
   one. Kinds with no logs return `domain.ErrNoLogs`,
-  which the UI treats as "show describe instead", not as a failure.
+  which the UI treats as "show describe instead", not as a failure. Both
+  readers accept lines of up to 1 MiB; a longer line ends the stream with a
+  visible error rather than being split.
 - **Exec** — `ShellSession` opens an interactive exec and hands back a
   writer for keystrokes plus a channel of raw output bytes, so the UI can
   render it inside a panel through a terminal emulator instead of taking
@@ -151,7 +160,9 @@ and custom resources. `YAML` goes through the dynamic client and strips
   there for a full-screen takeover. No `kubectl` binary is involved either
   way. Backends without one return `domain.ErrNoShell`.
 - **Port-forward** — SPDY dialer on a free local port; returns the address
-  and a stop function, so pressing `p` again tears it down.
+  and a stop function, so pressing `p` again tears it down. Pressed while
+  the dial is still in flight, `p` cancels that dial instead of opening a
+  second tunnel; the orphaned result is stopped when it lands.
 
 ### Custom resources
 
@@ -159,6 +170,13 @@ CRDs are informer-backed like anything else. Their *instances* are not:
 their GVRs are only known at runtime, and listing them costs one API call per
 CRD. That sweep runs on a background timer and the render path only ever
 reads its cache.
+
+Every row carries its exact group, version, resource, namespace, name and
+UID, and row actions use that reference. The by-name fallback behind
+`Describe`, `YAML` and `Apply` tries every CRD and fails closed: an ambiguous
+name (one object under two CRDs), a lookup error other than NotFound or
+Forbidden, and a missing object each produce their own error rather than a
+blanket "not found".
 
 ## The demo as a context
 

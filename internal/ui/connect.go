@@ -73,6 +73,7 @@ func (m *Model) connectCmd(name string) tea.Cmd {
 	}
 	m.connecting = true
 	m.offline = false
+	m.invalidateSession()
 	m.connGen++
 	gen, fn := m.connGen, m.connect
 	m.connName = name
@@ -101,12 +102,8 @@ func (m *Model) handleConnected(msg srcConnectedMsg) tea.Cmd {
 		return m.goOffline(msg.warn)
 	}
 	m.offline, m.offlineWhy = false, ""
-	old := m.src
-	m.src = msg.src
+	m.replaceSource(msg.src)
 	m.resetTrends()
-	if old != nil {
-		old.Close()
-	}
 	// A namespace restored from config for *this* context wins; otherwise
 	// take the context's own.
 	if !m.nsPinned || m.namespace == "" {

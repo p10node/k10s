@@ -100,7 +100,8 @@ func askOpenAI(ctx context.Context, cfg Config, cc Context, prompt string) (stri
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	// Reading determines success; closing the read-only body is best-effort cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
 		return "", apiError(resp.StatusCode, data)
@@ -146,7 +147,8 @@ func askAnthropic(ctx context.Context, cfg Config, cc Context, prompt string) (s
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	// Reading determines success; closing the read-only body is best-effort cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
 		return "", apiError(resp.StatusCode, data)

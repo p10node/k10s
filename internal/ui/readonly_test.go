@@ -79,8 +79,16 @@ func TestReadOnlyDropsDangerousPlugins(t *testing.T) {
 		{Name: "nuke", Plugin: plugin.Plugin{ShortCut: "Shift-N", Scopes: []string{"all"}, Command: "kubectl", Dangerous: true}},
 	}
 	got := m.availablePlugins()
-	if len(got) != 1 || got[0].Name != "tail" {
-		t.Fatalf("plugins offered = %+v, want only tail", got)
+	if len(got) != 0 {
+		t.Fatalf("plugins offered = %+v, want none", got)
+	}
+	for _, p := range m.plugins {
+		if cmd := m.firePlugin(p); cmd != nil || m.confirm != nil {
+			t.Fatal("external plugin admitted in read-only mode")
+		}
+		if cmd := m.runPlugin(p, plugin.Vars{}); cmd != nil {
+			t.Fatal("direct external plugin admitted in read-only mode")
+		}
 	}
 	if cmd := m.firePlugin(m.plugins[1]); cmd != nil || m.confirm != nil {
 		t.Error("a dangerous plugin could still be fired directly in read-only mode")

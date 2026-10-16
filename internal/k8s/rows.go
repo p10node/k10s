@@ -140,7 +140,7 @@ func (s *Store) Rows(kind, ns string) ([]string, [][]string) {
 	case "crds":
 		return k.Cols, s.crdRows()
 	case "customresources":
-		return applyNamespace(k.Cols, s.customResourceRows(), ns)
+		return applyNamespace(k.Cols, s.customResourceRows(ns), ns)
 	case "replicasets":
 		return applyNamespace(k.Cols, s.rsRows(ns), ns)
 	case "hpas":
@@ -209,7 +209,7 @@ func (s *Store) RowCount(kind, ns string) int {
 		// per CRD, so it waits until this badge is actually on screen.
 		s.noteInterest(kind, ns)
 		s.crMu.Lock()
-		cached, ok := s.crCache, !s.crAt.IsZero()
+		cached, ok := s.crCache, s.crNS == ns && !s.crAt.IsZero()
 		s.crMu.Unlock()
 		if !ok {
 			return domain.CountUnknown
@@ -748,8 +748,8 @@ func (s *Store) crdRows() [][]string {
 // touches the network: listing custom resources means one API call per CRD
 // (dozens on a cluster running cert-manager/argo/prometheus-operator), which
 // must never happen on the render path. refreshCRs does that work off-thread.
-func (s *Store) customResourceRows() []nsRow {
-	s.ensureCRRefresh()
+func (s *Store) customResourceRows(ns string) []nsRow {
+	s.ensureCRRefresh(ns)
 	s.crMu.Lock()
 	defer s.crMu.Unlock()
 	return s.crCache
@@ -757,12 +757,25 @@ func (s *Store) customResourceRows() []nsRow {
 
 // ensureCRRefresh kicks off the background CR sweep the first time custom
 // resources are displayed, and keeps it refreshing on an interval.
-func (s *Store) ensureCRRefresh() {
+func (s *Store) ensureCRRefresh(ns string) {
 	s.crMu.Lock()
+	changed := s.crNS != ns
+	if changed {
+		s.crNS = ns
+		s.crGeneration++
+		s.crCache, s.crAt, s.crErr = nil, time.Time{}, nil
+		s.crRefs = nil
+	}
 	already := s.crRunning
 	s.crRunning = true
 	s.crMu.Unlock()
 	if already {
+		if changed {
+			select {
+			case s.crKick <- struct{}{}:
+			default:
+			}
+		}
 		return
 	}
 	go func() {
@@ -775,12 +788,17 @@ func (s *Store) ensureCRRefresh() {
 				return
 			case <-t.C:
 				s.refreshCRs()
+			case <-s.crKick:
+				s.refreshCRs()
 			}
 		}
 	}()
 }
 
 func (s *Store) refreshCRs() {
+	s.crMu.Lock()
+	ns, generation := s.crNS, s.crGeneration
+	s.crMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -790,13 +808,16 @@ func (s *Store) refreshCRs() {
 	crdList, err := s.apiext.ApiextensionsV1().CustomResourceDefinitions().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		s.crMu.Lock()
-		s.crErr = err
+		if generation == s.crGeneration {
+			s.crErr = err
+		}
 		s.crMu.Unlock()
 		return
 	}
 
 	var out []nsRow
 	var firstErr error
+	var refs []domain.ResourceRef
 	for i := range crdList.Items {
 		crd := &crdList.Items[i]
 		ver := servedStorageVersion(crd)
@@ -804,7 +825,7 @@ func (s *Store) refreshCRs() {
 			continue
 		}
 		gvr := schema.GroupVersionResource{Group: crd.Spec.Group, Version: ver, Resource: crd.Spec.Names.Plural}
-		list, err := s.listCustomResources(ctx, gvr, crd.Spec.Scope == apiextv1.NamespaceScoped)
+		list, err := s.listCustomResources(ctx, gvr, crd.Spec.Scope == apiextv1.NamespaceScoped, ns)
 		if err != nil || list == nil {
 			if err != nil && firstErr == nil {
 				firstErr = err
@@ -817,11 +838,15 @@ func (s *Store) refreshCRs() {
 				ns = "-"
 			}
 			out = append(out, nsRow{ns, []string{item.GetName(), crd.Spec.Names.Kind, age(item.GetCreationTimestamp().Time)}})
+			refs = append(refs, domain.ResourceRef{Group: gvr.Group, Version: gvr.Version, Resource: gvr.Resource, Kind: crd.Spec.Names.Kind, Namespaced: crd.Spec.Scope == apiextv1.NamespaceScoped, Namespace: item.GetNamespace(), Name: item.GetName(), UID: string(item.GetUID()), ResourceVersion: item.GetResourceVersion()})
 		}
 	}
 
 	s.crMu.Lock()
-	s.crCache, s.crAt, s.crErr = out, time.Now(), firstErr
+	if generation == s.crGeneration {
+		s.crCache, s.crAt, s.crErr = out, time.Now(), firstErr
+		s.crRefs = refs
+	}
 	s.crMu.Unlock()
 }
 
@@ -829,7 +854,7 @@ func (s *Store) refreshCRs() {
 // Real dynamic clients return an error for an unusable GVR; some fake or
 // third-party implementations panic when a List kind is missing. The sweep
 // runs in a background goroutine, where such a panic must not kill the TUI.
-func (s *Store) listCustomResources(ctx context.Context, gvr schema.GroupVersionResource, namespaced bool) (list *unstructured.UnstructuredList, err error) {
+func (s *Store) listCustomResources(ctx context.Context, gvr schema.GroupVersionResource, namespaced bool, ns string) (list *unstructured.UnstructuredList, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			list = nil
@@ -837,7 +862,11 @@ func (s *Store) listCustomResources(ctx context.Context, gvr schema.GroupVersion
 		}
 	}()
 	if namespaced {
-		return s.c.Dynamic.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+		scope := effectiveNS(ns)
+		if ns == domain.AllNamespaces {
+			scope = metav1.NamespaceAll
+		}
+		return s.c.Dynamic.Resource(gvr).Namespace(scope).List(ctx, metav1.ListOptions{})
 	}
 	return s.c.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
 }

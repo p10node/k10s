@@ -44,6 +44,7 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%d)
           STAMP="-X github.com/p10node/k10s/internal/version.Version=$VERSION -X github.com/p10node/k10s/internal/version.Commit=$COMMIT -X github.com/p10node/k10s/internal/version.Date=$DATE"
+          rm -rf dist
           mkdir -p dist
           for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
             os="${p%/*}"; arch="${p#*/}"
@@ -60,6 +61,15 @@ jobs:
           done
           (cd dist && sha256sum k10s_* > checksums.txt)
           ls -lh dist
+
+      - name: verify fresh updater artifact
+        env:
+          K10S_UPDATE_E2E_REQUIRED: "1"
+          K10S_UPDATE_E2E_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          export K10S_UPDATE_E2E_COMMIT=$(git rev-parse HEAD)
+          go test -count=1 ./internal/update -run '^TestApplyAgainstRealDistArtifacts$' -v
 
       # Hand-written notes live in docs/releases/<tag>.md and are optional:
       # without one the release still gets GitHub's generated commit list.

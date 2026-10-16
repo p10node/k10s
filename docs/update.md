@@ -63,8 +63,9 @@ The install itself:
    rename across filesystems is a copy — not atomic.
 4. **Verify** the SHA-256 against the release's `checksums.txt`. A manifest
    that disagrees, *or that doesn't list the asset at all*, stops the
-   install. A release with no manifest installs unverified, and the confirm
-   dialog says so.
+   install. A release with no manifest cannot be installed by self-update.
+   There is no unverified-install override. SHA-256 detects artifact mismatch;
+   it does not provide independent publisher authentication or signatures.
 5. **Extract** `k10s` (or `k10s.exe`) from the `.tar.gz`/`.zip`, or take the
    asset as-is when it is a bare binary. An archive that renamed the binary
    falls back to its largest entry.

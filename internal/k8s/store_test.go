@@ -397,6 +397,7 @@ func TestDeletingLastCustomResourceLeavesLoadedEmptyView(t *testing.T) {
 		},
 	}}
 	widget.SetGroupVersionKind(schema.GroupVersionKind{Group: "testing.k10s.io", Version: "v1", Kind: "Widget"})
+	widget.SetUID("only-widget-uid")
 
 	s := newTestStoreWithCRDs(t, []runtime.Object{crd}, widget)
 	s.Rows("customresources", "default")
@@ -412,7 +413,11 @@ func TestDeletingLastCustomResourceLeavesLoadedEmptyView(t *testing.T) {
 		t.Fatalf("initial custom-resource rows = %v, want only-widget", rows)
 	}
 
-	if err := s.Delete("customresources", "default", "only-widget"); err != nil {
+	_, identified := s.CustomResourceRows("default")
+	if len(identified) != 1 {
+		t.Fatal("missing exact resource identity")
+	}
+	if err := s.DeleteResource(identified[0].Ref); err != nil {
 		t.Fatalf("Delete custom resource: %v", err)
 	}
 	s.refreshCRs()

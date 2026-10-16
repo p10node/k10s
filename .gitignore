@@ -9,3 +9,4 @@ coverage.html
 /dist
 
 .DS_Store
+.hermes
