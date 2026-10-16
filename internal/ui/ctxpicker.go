@@ -115,11 +115,19 @@ func (m *Model) contextBody(inner, rows int) []string {
 		s(th.Border).Render(strings.Repeat("╌", inner)),
 	}
 
+	// 5 = the header and rule, plus the 3-line legend.
+	cur := clamp(m.ctxIdx, 0, maxi(0, len(choices)-1))
+	visible := maxi(1, rows-5)
+	top := 0
+	if len(choices) > visible {
+		top = clamp(cur-visible/2, 0, len(choices)-visible)
+	}
+
 	// How much of the row the right-hand label may take. Long context names
 	// are the norm, so the label is what gets dropped when it does not fit,
 	// never the name.
-	cur := clamp(m.ctxIdx, 0, maxi(0, len(choices)-1))
-	for i, c := range choices {
+	for i := top; i < len(choices) && i < top+visible; i++ {
+		c := choices[i]
 		selected := i == cur
 		bg, fg := th.Bg, th.Fg
 		if selected {
