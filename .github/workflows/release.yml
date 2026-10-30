@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0 # git describe needs the tags
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # go.mod's `go` line is the oldest Go the code builds with, not the
           # toolchain to ship with. Reading it here built every release so far
