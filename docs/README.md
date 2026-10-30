@@ -15,6 +15,7 @@
 | [install.md](install.md)                 | Installer script, flags, hosting the short URL, uninstall   |
 | [update.md](update.md)                   | Self-update: version stamps, release matching, installing   |
 | [dev.md](dev.md)                         | Build, tests, headless renderer, width invariant            |
+| [maintaining.md](maintaining.md)         | Pull requests, CI, rulesets, releases: the maintainer side  |
 | [roadmap.md](roadmap.md)                 | What's done and what's left                                 |
 | [plan.md](plan.md)                       | Task cards for the backlog, ready to hand to an agent       |
 | [marketing.md](marketing.md)             | Positioning, channels, launch sequence, repo hygiene        |

@@ -359,6 +359,9 @@ cluster. Nothing in these docs is drawn by hand - the frames come from that
 renderer, the hero image from `just screenshot` driving the real binary in a
 real terminal.
 
+Maintainers: [docs/maintaining.md](docs/maintaining.md) is how pull
+requests, CI, the rulesets and releases are run.
+
 Good first issues live in [roadmap.md → possible next
 steps](docs/roadmap.md#possible-next-steps): more kinds, click-to-sort
 columns, multi-select bulk delete, grep inside the log stream, saved views.
