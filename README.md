@@ -96,8 +96,8 @@ macOS and Linux, `amd64` and `arm64`. It picks the right prebuilt binary,
 verifies its sha256 against the release manifest, and installs it into
 `/usr/local/bin` (or `~/.local/bin` when that needs a password it cannot
 ask for). `--dir`, `--version` and `--no-sudo` are in [docs/install.md](docs/install.md),
-along with how to read it before you run it and the matching
-`uninstall.sh`.
+along with how to read it before you run it, how to check a release's signed
+build provenance, and the matching `uninstall.sh`.
 
 With Go on the box:
 

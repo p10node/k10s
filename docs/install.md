@@ -82,6 +82,16 @@ curl -fsSL  $base/checksums.txt | shasum -a 256 -c --ignore-missing
 tar xzf k10s_${tag}_darwin_arm64.tar.gz && sudo install -m 755 k10s /usr/local/bin/
 ```
 
+A checksum only proves the archive matches the manifest published next to
+it. Starting with the first release after v0.1.7, every archive also carries
+a build provenance attestation, signed through Sigstore by the release
+workflow, which shows it was built by this repository's workflow from the
+tagged commit. With the GitHub CLI:
+
+```bash
+gh attestation verify k10s_${tag}_darwin_arm64.tar.gz --repo p10node/k10s
+```
+
 ## Hosting the short URL
 
 Both scripts are served straight out of the repo; the domain is a redirect in

@@ -12,23 +12,28 @@ on:
 
 permissions:
   contents: write # required to create the release and upload assets
+  id-token: write # lets actions/attest get a signing certificate from Sigstore
+  attestations: write # stores the build provenance attestations
+  artifact-metadata: write # records the attested archives for actions/attest
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # git describe needs the tags
+          persist-credentials: false # publish uses GH_TOKEN, not git
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # go.mod's `go` line is the oldest Go the code builds with, not the
-          # toolchain to ship with. Reading it here built every release so far
-          # with Go 1.26.0, whose standard library has since had many security
-          # fixes (crypto/tls, crypto/x509, net/http among them). Releases take
-          # the newest 1.26 patch instead; move this with go.mod's minor.
-          go-version: "1.26.x"
+          # toolchain to ship with: reading it here once built releases with
+          # Go 1.26.0, long after its standard library had security fixes
+          # (crypto/tls, crypto/x509, net/http among them). Releases take the
+          # newest patch of the current Go release instead; move this to
+          # 1.28.x when Go 1.28 comes out.
+          go-version: "1.27.x"
           check-latest: true
           cache: true
 
@@ -68,8 +73,19 @@ jobs:
           K10S_UPDATE_E2E_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          export K10S_UPDATE_E2E_COMMIT=$(git rev-parse HEAD)
+          K10S_UPDATE_E2E_COMMIT=$(git rev-parse HEAD)
+          export K10S_UPDATE_E2E_COMMIT
           go test -count=1 ./internal/update -run '^TestApplyAgainstRealDistArtifacts$' -v
+
+      # Build provenance for every archive listed in checksums.txt, signed
+      # with a short-lived Sigstore certificate tied to this workflow run. It
+      # comes before publish on purpose: if attesting fails, nothing goes out
+      # unattested. Anyone can check an archive with
+      #   gh attestation verify k10s_<tag>_<os>_<arch>.tar.gz --repo p10node/k10s
+      - name: attest
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/checksums.txt
 
       # Hand-written notes live in docs/releases/<tag>.md and are optional:
       # without one the release still gets GitHub's generated commit list.
