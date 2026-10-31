@@ -162,3 +162,6 @@ Releases are looked for in `p10node/k10s` (`update.DefaultRepo` in
 `internal/update/update.go`). Until the first tag is pushed, `/update`
 reports that the repo has no published releases — that is the expected
 answer, not a failure.
+
+Who can push a tag, and what to do about one pushed by mistake, is in
+[maintaining.md](maintaining.md#releases).
