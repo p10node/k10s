@@ -240,6 +240,17 @@ tests with fake clientsets, but the author has not yet smoke-tested it on a
 production cluster. Try it on `kind` first. Known limits are in
 [the roadmap](docs/roadmap.md#known-limits).
 
+## Contributors
+
+| Who                                                | What                  |
+|----------------------------------------------------|-----------------------|
+| [@pierreneter](https://github.com/pierreneter)     | author and maintainer |
+| [@junior](https://github.com/junior)               | maintainer            |
+| [@clamshell2000](https://github.com/clamshell2000) | contributor/observer  |
+
+Pull requests welcome. See [docs/maintaining.md](docs/maintaining.md) for how
+they are reviewed and released.
+
 ## Thanks
 
 To my colleagues. k10s was built so that looking at our clusters stops being
