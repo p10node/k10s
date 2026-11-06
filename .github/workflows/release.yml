@@ -38,7 +38,7 @@ jobs:
           cache: true
 
       - name: test
-        run: go test ./...
+        run: go test -short ./...
 
       - name: build every platform
         env:

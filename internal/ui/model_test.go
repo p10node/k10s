@@ -98,6 +98,9 @@ func TestViewDoesNotBuildRowsForEveryKind(t *testing.T) {
 // TestKeypressLatency guards responsiveness directly: a navigation keypress
 // plus the frame it produces must stay far below human-perceptible lag.
 func TestKeypressLatency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock bound that a busy CI runner can miss; `just test-perf` runs it")
+	}
 	m := newTestModel(t, mock.New(""))
 
 	// warm up (first frame builds caches/styles)

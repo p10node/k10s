@@ -500,16 +500,28 @@ func TestThemeButtonOpensPicker(t *testing.T) {
 
 // clickZone clicks the middle of a named zone, reporting whether it existed.
 func clickZone(m *Model, id string) bool {
-	z := zone.Get(id)
+	z := waitZone(id)
 	if z == nil {
 		return false
 	}
-	x, y := z.StartX, z.StartY
-	if x == 0 && y == 0 {
-		return false
-	}
-	m.handleMouse(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m.handleMouse(tea.MouseMsg{X: z.StartX, Y: z.StartY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	return true
+}
+
+// waitZone returns the named zone once it has a position, or nil if it never
+// shows up. bubblezone records zones on its own goroutine after View() scans
+// the frame, so reading one right after a render can miss it on a busy machine.
+func waitZone(id string) *zone.ZoneInfo {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if z := zone.Get(id); z != nil && (z.StartX != 0 || z.StartY != 0) {
+			return z
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // ---- :scale ---------------------------------------------------------------
