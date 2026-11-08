@@ -218,7 +218,9 @@ func clickAt(x, y int) tea.MouseMsg {
 func TestDoubleClickOpensRow(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
 	dismissOnboarding(m)
-	m.View() // register zones
+	if !renderSettled(m) { // register zones
+		t.Fatal("the frame's zones never settled")
+	}
 
 	l := m.layout()
 	x, y := l.leftW+5, l.midY+3
@@ -499,12 +501,50 @@ func TestThemeButtonOpensPicker(t *testing.T) {
 }
 
 // clickZone clicks the middle of a named zone, reporting whether it existed.
+// It renders m again and waits for that frame to settle first, so the click
+// meets this frame's zones and no zone left over from an earlier one.
 func clickZone(m *Model, id string) bool {
+	if !renderSettled(m) {
+		return false
+	}
 	z := waitZone(id)
 	if z == nil {
 		return false
 	}
 	m.handleMouse(tea.MouseMsg{X: z.StartX, Y: z.StartY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	return true
+}
+
+// settleZone is a zone no frame draws: renderSettled plants it to tell when
+// bubblezone has caught up with a frame.
+const settleZone = "test:settle"
+
+// renderSettled renders m and returns once bubblezone has stored every zone
+// of that frame and dropped every zone the frame does not draw. Scan hands a
+// frame's zones to a goroutine one at a time, in screen order, and then a
+// marker that deletes the zones of earlier frames. Right after View(), a zone
+// further down the frame, or one an earlier test drew (the manager is shared
+// by the whole test binary), can still be where it was and catch a click
+// meant for another. A zone planted by a scan of its own goes only when the
+// marker of the frame scanned after it has been handled.
+func renderSettled(m *Model) bool {
+	zone.Scan(zone.Mark(settleZone, " "))
+	if !waitUntil(func() bool { return zone.Get(settleZone) != nil }) {
+		return false
+	}
+	m.View()
+	return waitUntil(func() bool { return zone.Get(settleZone) == nil })
+}
+
+// waitUntil polls cond for up to two seconds, reporting whether it held.
+func waitUntil(cond func() bool) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
 	return true
 }
 
