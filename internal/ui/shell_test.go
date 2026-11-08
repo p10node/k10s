@@ -212,6 +212,26 @@ func TestShellSizedToThePanel(t *testing.T) {
 	}
 }
 
+// The table is hidden behind the shell, so the wheel over the pane must not
+// move its selection: detaching would land on a different row.
+func TestWheelOverTheShellLeavesTheTableAlone(t *testing.T) {
+	m, sh := newShellModel(t)
+	openShell(t, m, sh)
+	kind := m.curKind().Key
+	rowBefore, memBefore := m.rowIdx, m.rowMem[kind]
+
+	l := m.layout()
+	m.handleMouse(wheel(l.leftW+5, l.midY+4, false))
+	m.handleMouse(wheel(l.leftW+5, l.midY+4, false))
+
+	if m.rowIdx != rowBefore || m.rowMem[kind] != memBefore {
+		t.Errorf("wheel over the shell moved the table: row %d -> %d", rowBefore, m.rowIdx)
+	}
+	if m.mode != modeShell {
+		t.Errorf("mode = %v, want the shell to stay open", m.mode)
+	}
+}
+
 func TestNoShellFallsBackToAToast(t *testing.T) {
 	m := newTestModel(t, mock.New("")) // demo backend has no shell
 	dismissOnboarding(m)
