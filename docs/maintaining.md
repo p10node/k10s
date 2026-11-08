@@ -76,7 +76,7 @@ To take back a tag pushed by mistake: disable `release-tags`
 ## Releases
 
 ```bash
-just tag v1.4.0        # tags, pushes, release.yml does the rest
+just tag vX.Y.Z        # tags, pushes, release.yml does the rest
 ```
 
 `.github/workflows/release.yml` tests, cross-compiles the five platforms,

@@ -29,7 +29,7 @@ check and the status-bar badge run on.
 
 - Runs at most once every 24 hours (`update.CheckInterval`), tracked as
   `update.last_check` in the config file.
-- Reports a newer release as a status-bar toast plus a clickable `⇧ 1.4.0`
+- Reports a newer release as a status-bar toast plus a clickable `⇧ X.Y.Z`
   badge. It never opens a dialog: nobody launches k10s to be interrupted.
 - Says nothing when there is nothing newer, and **says nothing when it
   fails** — an offline laptop is not an error the user asked about. A manual
@@ -96,8 +96,8 @@ release may be built by `just release`, by goreleaser, or by hand. Matching
 needs one OS token *and* one architecture token, each delimited:
 
 ```
-k10s_1.4.0_darwin_arm64.tar.gz     ✓
-k10s-v1.4.0-macos-x86_64.tar.gz    ✓  darwin/amd64
+k10s_X.Y.Z_darwin_arm64.tar.gz     ✓
+k10s-vX.Y.Z-macos-x86_64.tar.gz    ✓  darwin/amd64
 k10s.Darwin.aarch64.tar.gz         ✓  darwin/arm64
 k10s-linux-x64.tgz                 ✓  linux/amd64
 k10s-linux-amd64                   ✓  bare binary, no archive
@@ -116,7 +116,7 @@ the list of what *was* published. It is never approximated.
 `internal/version` holds the stamp:
 
 ```
-go build -ldflags "-X github.com/p10node/k10s/internal/version.Version=v1.4.0 \
+go build -ldflags "-X github.com/p10node/k10s/internal/version.Version=vX.Y.Z \
                    -X github.com/p10node/k10s/internal/version.Commit=abc1234 \
                    -X github.com/p10node/k10s/internal/version.Date=2026-08-26"
 ```
@@ -138,7 +138,7 @@ which is the case a string comparison gets backwards.
 ## Publishing a release
 
 ```bash
-just tag v1.4.0        # tags and pushes; the workflow does the rest
+just tag vX.Y.Z        # tags and pushes; the workflow does the rest
 ```
 
 `.github/workflows/release.yml` builds `darwin/{amd64,arm64}`,

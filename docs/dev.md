@@ -144,7 +144,7 @@ and sibling runs instead, never nesting.
 ## Cutting a release
 
 ```bash
-just tag v1.4.0        # tags, pushes, and the workflow publishes the build
+just tag vX.Y.Z        # tags, pushes, and the workflow publishes the build
 just release           # or build the same archives locally into dist/
 ```
 
