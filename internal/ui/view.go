@@ -936,6 +936,19 @@ func (m *Model) viewActions(w, h int) Block {
 
 // ---- bottom: prompt + status ---------------------------------------------
 
+// inputView is the text input's View with its trailing run of plain spaces
+// painted in PlaceholderStyle. bubbles (since v0.21.1) pads a placeholder
+// with spaces that carry no style, so they would show the terminal's own
+// background rather than the input's, as they did up to v0.21.0.
+func (m *Model) inputView() string {
+	v := m.input.View()
+	t := strings.TrimRight(v, " ")
+	if pad := len(v) - len(t); pad > 0 {
+		t += m.input.PlaceholderStyle.Inline(true).Render(strings.Repeat(" ", pad))
+	}
+	return t
+}
+
 func (m *Model) viewPrompt(l layout) Block {
 	th := m.th()
 	focused := m.focus == focusPrompt
@@ -985,7 +998,7 @@ func (m *Model) viewPrompt(l layout) Block {
 		// sideways in a one-line field.
 		body = m.zoomedPromptBody(caret, inner, l.promptH-2)
 	} else {
-		body = []string{m.mark("prompt", padBG(caret+m.input.View(), inner, th.Bg))}
+		body = []string{m.mark("prompt", padBG(caret+m.inputView(), inner, th.Bg))}
 	}
 
 	return Panel(th, PanelOpts{
@@ -1189,7 +1202,7 @@ func (m *Model) zoomedPromptBody(caret string, inner, rows int) []string {
 	out := make([]string, 0, rows)
 	// Row 1 stays the real textinput so editing and the caret behave
 	// normally; the wrap below is a read-only continuation.
-	out = append(out, m.mark("prompt", padBG(caret+m.input.View(), inner, th.Bg)))
+	out = append(out, m.mark("prompt", padBG(caret+m.inputView(), inner, th.Bg)))
 	if len(segs) > 1 {
 		for _, seg := range segs[1:] {
 			if len(out) >= rows-1 {

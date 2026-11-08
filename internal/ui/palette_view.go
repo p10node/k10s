@@ -22,7 +22,7 @@ func (m *Model) overlayPalette(root Block) Block {
 
 	m.input.Width = inner - 4
 	body := []string{
-		s(th.Accent).Bold(true).Render(" ⌕ ") + m.input.View(),
+		s(th.Accent).Bold(true).Render(" ⌕ ") + m.inputView(),
 		s(th.Border).Render(strings.Repeat("╌", inner)),
 	}
 
