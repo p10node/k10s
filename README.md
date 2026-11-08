@@ -55,7 +55,8 @@ and **how little you have to remember**.
 - **Explicit feature status.** The AI integration is being reworked and is
   disabled. `ctrl+a` explains that status rather than sending a request.
 - **It updates itself.** `/update` installs the newest release over the
-  running binary - checksum-verified, atomic, offers to restart into it.
+  running binary - checksum-verified, atomic, offers to restart into it. On
+  a Homebrew install it points at `brew upgrade k10s` instead.
 - **Your k9s-style command plugins fit.** Put scoped shortcuts in
   `~/.k10s/plugins.yaml`; they appear beside built-in actions and receive the
   selected object, namespace, context and column values.
@@ -99,6 +100,18 @@ ask for). `--dir`, `--version` and `--no-sudo` are in [docs/install.md](docs/ins
 along with how to read it before you run it, how to check a release's signed
 build provenance, and the matching `uninstall.sh`.
 
+With Homebrew, on macOS or Linux:
+
+```bash
+brew install p10node/tap/k10s
+```
+
+It installs the same prebuilt binary, checked against the release's sha256,
+and `brew upgrade k10s` keeps it current. Installing by the full name trusts
+that one formula, which Homebrew 6 and later ask of a tap;
+[docs/install.md](docs/install.md#tap-trust) has the short-name and Brewfile
+versions.
+
 With Go on the box:
 
 ```bash
@@ -121,6 +134,9 @@ upgrade is just:
 ```bash
 k10s update
 ```
+
+On a Homebrew install that is `brew upgrade k10s`: `k10s update` says so and
+leaves Homebrew's copy alone.
 
 Then run it:
 

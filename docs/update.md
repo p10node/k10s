@@ -13,6 +13,10 @@ k10s --version     same, one line, no TTY needed
 Plus a check that runs at most once a day at startup and only speaks up when
 there is something newer.
 
+A copy that Homebrew installed is Homebrew's to upgrade: `k10s update` and
+`/update` say `brew upgrade k10s` instead. See
+[Package managers](#package-managers).
+
 ## The two halves
 
 `internal/update` is split so the cheap half can run unattended:
@@ -89,6 +93,34 @@ environment (`syscall.Exec` on POSIX — no second process, no lost TTY; a
 child process on Windows, which has no exec). Declining keeps the session
 running on the old build.
 
+## Package managers
+
+A binary that a package manager installed belongs to that package manager,
+which keeps its own record of the version it put where. A self-update
+written over it would leave that record naming a build that is gone, so
+k10s steps aside and names the command that does the job:
+
+| Installed by | Recognised by                                                          | Upgrade with        |
+|--------------|------------------------------------------------------------------------|---------------------|
+| Homebrew     | the binary, symlinks resolved, is in `<prefix>/Cellar/k10s/<version>/` | `brew upgrade k10s` |
+
+- `k10s update` prints `k10s: installed by Homebrew, which updates it: run
+  brew upgrade k10s` and exits 1. It checks nothing and writes nothing.
+- `/update`, and a click on the status-bar badge, show the same line instead
+  of the confirmation dialog. `/update skip` still silences a release.
+- The startup check still runs, and `update.disabled` still turns it off.
+  When it finds a newer release, its notice says `brew upgrade k10s`
+  instead of `/update`.
+- `/version` says who installed the binary.
+
+Recognition compares whole path segments once symlinks are resolved. macOS
+reports the `bin/k10s` link that Homebrew puts on `PATH`, and the link points
+into the keg; Linux reports the keg directly. A directory that merely has
+"Cellar" in its name is not a keg, and the copy `install.sh` puts in
+`/usr/local/bin` or `/opt/homebrew/bin` is a plain file, so `k10s update`
+replaces that one as before. `Apply` makes the same check before it writes
+anything, so no way into the install can write into a keg.
+
 ## Which asset gets picked
 
 Assets are matched by name, not by a fixed convention, because the same
@@ -145,6 +177,10 @@ just tag v1.4.0        # tags and pushes; the workflow does the rest
 `linux/{amd64,arm64}` and `windows/amd64`, writes `checksums.txt`, and
 publishes them with generated notes. `just release` does the same thing
 locally into `dist/` — same names, same manifest format.
+
+After a full release, `.github/workflows/homebrew.yml` points the Homebrew
+formula at it; [maintaining.md](maintaining.md#the-homebrew-tap) has the
+details.
 
 The naming and the manifest format are not cosmetic: they are what the
 matcher and the verifier read. `internal/update`'s end-to-end test installs
