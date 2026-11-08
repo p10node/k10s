@@ -1,0 +1,203 @@
+# Points the Homebrew formula at a release: Formula/k10s.rb in
+# p10node/homebrew-tap, which `brew install p10node/tap/k10s` installs.
+# release.yml calls it after every full release. Run it by hand (Actions >
+# homebrew > Run workflow) with a tag to publish that release to the tap again,
+# for instance the first time, once the tap and its token exist.
+#
+# Nothing is written until all of this holds: the tag is a full release tag
+# (vMAJOR.MINOR.PATCH), its release is published and is neither a draft nor a
+# pre-release, every archive the formula names matches checksums.txt and
+# carries the build provenance attestation release.yml signed for that tag, and
+# the tap holds neither this version nor a newer one. The formula is then
+# committed and pushed with HOMEBREW_TAP_TOKEN, a fine-grained token that can
+# write the contents of p10node/homebrew-tap and nothing else.
+name: homebrew
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, such as v1.4.0
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, such as v1.4.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read # gh attestation verify reads the release's attestations
+
+jobs:
+  # A job's `if` cannot see secrets, so this job looks for the token and the
+  # next one runs only when it is there. Called from release.yml without it,
+  # the tap is left alone with a notice: the release has been published by
+  # then and stands. Run by hand without it, this fails, since a push was
+  # asked for.
+  token:
+    if: github.repository == 'p10node/k10s'
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          PRESENT: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$PRESENT" = true ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so nothing can be pushed to p10node/homebrew-tap. docs/maintaining.md says how to create it."
+            exit 1
+          else
+            echo "::notice title=Homebrew tap not updated::The HOMEBREW_TAP_TOKEN secret is not set. Once it is, run the homebrew workflow by hand with this tag."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  formula:
+    needs: token
+    if: needs.token.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One at a time, so two releases close together cannot race each other's
+    # push to the tap.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - name: check the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Full releases only: a pre-release in the tap would be offered to
+          # every Homebrew user as an upgrade.
+          if ! [[ "$TAG" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "::error::Not a release tag: $(printf '%q' "$TAG"). Expected vMAJOR.MINOR.PATCH, such as v1.4.0."
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+          } >> "$GITHUB_OUTPUT"
+
+      # The workflow's own commit, for packaging/homebrew/formula.sh: the tag
+      # for a release, the branch it was started from for a run by hand.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: check the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # This endpoint returns published releases only: a draft is a 404.
+          state=$(gh api "repos/p10node/k10s/releases/tags/$TAG" --jq '"draft=\(.draft) prerelease=\(.prerelease)"') || {
+            echo "::error::p10node/k10s has no published release $TAG."
+            exit 1
+          }
+          if [ "$state" != "draft=false prerelease=false" ]; then
+            echo "::error::$TAG is not a full release ($state)."
+            exit 1
+          fi
+
+      - name: check the archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/release"
+          mkdir -p "$dir"
+          gh release download "$TAG" --repo p10node/k10s --dir "$dir" \
+            --pattern checksums.txt \
+            --pattern "k10s_${TAG}_darwin_*.tar.gz" \
+            --pattern "k10s_${TAG}_linux_*.tar.gz"
+          cd "$dir"
+          for platform in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
+            archive="k10s_${TAG}_${platform}.tar.gz"
+            # The digest the formula will carry is this file's...
+            awk -v name="$archive" '$2 == name' checksums.txt | sha256sum --check --strict
+            # ...and this file is what release.yml built from the tag.
+            gh attestation verify "$archive" --repo p10node/k10s \
+              --signer-workflow p10node/k10s/.github/workflows/release.yml \
+              --source-ref "refs/tags/$TAG" \
+              --deny-self-hosted-runners
+          done
+
+      - name: write the formula
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          packaging/homebrew/formula.sh "$TAG" "$RUNNER_TEMP/release/checksums.txt" > "$RUNNER_TEMP/k10s.rb"
+          cat "$RUNNER_TEMP/k10s.rb"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: p10node/homebrew-tap
+          ref: main
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          persist-credentials: false
+
+      - name: compare with the tap
+        id: compare
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          current=""
+          if [ -f tap/Formula/k10s.rb ]; then
+            # The formula has no version line (Homebrew reads the version out
+            # of the archive URLs), so read it from them: all four name the
+            # same tag.
+            current=$(sed -n 's|.*/releases/download/v\([0-9][0-9.]*\)/.*|\1|p' tap/Formula/k10s.rb | sort -u)
+            if [ -z "$current" ] || [ "$(printf '%s\n' "$current" | wc -l)" -ne 1 ]; then
+              echo "::error::Cannot tell which release tap/Formula/k10s.rb points at."
+              exit 1
+            fi
+          fi
+          if [ "$current" = "$VERSION" ]; then
+            echo "::notice::The tap already has k10s $VERSION: nothing to do."
+            echo "write=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)" = "$current" ]; then
+            echo "::warning::The tap has k10s $current, which is newer than $VERSION: left as it is."
+            echo "write=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "write=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: push the formula
+        if: steps.compare.outputs.write == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p tap/Formula
+          cp "$RUNNER_TEMP/k10s.rb" tap/Formula/k10s.rb
+          cd tap
+          git add Formula/k10s.rb
+          if git diff --cached --quiet; then
+            echo "::notice::Formula/k10s.rb already holds this formula."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "k10s $VERSION"
+          # The checkout kept no credentials: the token goes to this push only.
+          auth=$(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:main
+          echo "k10s $VERSION is in p10node/homebrew-tap." >> "$GITHUB_STEP_SUMMARY"
