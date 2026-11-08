@@ -13,11 +13,11 @@ import (
 
 // sums is a checksums.txt the way release.yml writes it: sha256sum output
 // for all five archives, Windows included.
-const sums = `1111111111111111111111111111111111111111111111111111111111111111  k10s_v1.4.0_darwin_amd64.tar.gz
-2222222222222222222222222222222222222222222222222222222222222222  k10s_v1.4.0_darwin_arm64.tar.gz
-3333333333333333333333333333333333333333333333333333333333333333  k10s_v1.4.0_linux_amd64.tar.gz
-4444444444444444444444444444444444444444444444444444444444444444  k10s_v1.4.0_linux_arm64.tar.gz
-5555555555555555555555555555555555555555555555555555555555555555  k10s_v1.4.0_windows_amd64.zip
+const sums = `1111111111111111111111111111111111111111111111111111111111111111  k10s_v9.9.9_darwin_amd64.tar.gz
+2222222222222222222222222222222222222222222222222222222222222222  k10s_v9.9.9_darwin_arm64.tar.gz
+3333333333333333333333333333333333333333333333333333333333333333  k10s_v9.9.9_linux_amd64.tar.gz
+4444444444444444444444444444444444444444444444444444444444444444  k10s_v9.9.9_linux_arm64.tar.gz
+5555555555555555555555555555555555555555555555555555555555555555  k10s_v9.9.9_windows_amd64.zip
 `
 
 // formula runs formula.sh under shell and returns what it printed.
@@ -42,11 +42,11 @@ func formula(t *testing.T, shell, tag, manifest string) (string, error) {
 }
 
 func TestFormulaPointsEachPlatformAtItsArchive(t *testing.T) {
-	out, err := formula(t, "bash", "v1.4.0", sums)
+	out, err := formula(t, "bash", "v9.9.9", sums)
 	if err != nil {
 		t.Fatalf("formula.sh: %v\n%s", err, out)
 	}
-	base := "https://github.com/p10node/k10s/releases/download/v1.4.0/"
+	base := "https://github.com/p10node/k10s/releases/download/v9.9.9/"
 	for _, p := range []struct{ platform, sum string }{
 		{"darwin_arm64", "2222"},
 		{"darwin_amd64", "1111"},
@@ -55,7 +55,7 @@ func TestFormulaPointsEachPlatformAtItsArchive(t *testing.T) {
 	} {
 		// The sha256 line has to follow its own url, or a Mac would check
 		// one archive against another's digest.
-		want := "url \"" + base + "k10s_v1.4.0_" + p.platform + ".tar.gz\"\n" +
+		want := "url \"" + base + "k10s_v9.9.9_" + p.platform + ".tar.gz\"\n" +
 			"      sha256 \"" + strings.Repeat(p.sum, 16) + "\""
 		if !strings.Contains(out, want) {
 			t.Errorf("formula has no\n%s\nin:\n%s", want, out)
@@ -84,11 +84,11 @@ func TestFormulaPointsEachPlatformAtItsArchive(t *testing.T) {
 
 // junior's rule for shell scripts: they run the same under bash and zsh.
 func TestFormulaIsTheSameUnderBashAndZsh(t *testing.T) {
-	fromBash, err := formula(t, "bash", "v1.4.0", sums)
+	fromBash, err := formula(t, "bash", "v9.9.9", sums)
 	if err != nil {
 		t.Fatalf("bash: %v\n%s", err, fromBash)
 	}
-	fromZsh, err := formula(t, "zsh", "v1.4.0", sums)
+	fromZsh, err := formula(t, "zsh", "v9.9.9", sums)
 	if err != nil {
 		t.Fatalf("zsh: %v\n%s", err, fromZsh)
 	}
@@ -109,20 +109,20 @@ func TestFormulaRefusesWhatItCannotPublish(t *testing.T) {
 	}
 	// A manifest that does list the tag's archives, so that a refused tag is
 	// refused for being the wrong kind of tag, not for a missing archive.
-	listing := func(tag string) string { return strings.ReplaceAll(sums, "v1.4.0", tag) }
+	listing := func(tag string) string { return strings.ReplaceAll(sums, "v9.9.9", tag) }
 	for _, c := range []struct {
 		name, tag, manifest, why string
 	}{
-		{"a pre-release", "v1.4.0-rc.1", listing("v1.4.0-rc.1"), "not a release tag"},
-		{"a tag without the v", "1.4.0", listing("1.4.0"), "not a release tag"},
+		{"a pre-release", "v9.9.9-rc.1", listing("v9.9.9-rc.1"), "not a release tag"},
+		{"a tag without the v", "9.9.9", listing("9.9.9"), "not a release tag"},
 		{"two version parts", "v1.4", listing("v1.4"), "not a release tag"},
-		{"four version parts", "v1.4.0.1", listing("v1.4.0.1"), "not a release tag"},
-		{"a second line in the tag", "v1.4.0\nv1.4.0", sums, "not a release tag"},
-		{"an archive missing from the manifest", "v1.4.0", drop("linux_arm64"), "does not list k10s_v1.4.0_linux_arm64.tar.gz"},
-		{"an archive listed twice", "v1.4.0", sums + strings.Repeat("6", 64) + "  k10s_v1.4.0_darwin_arm64.tar.gz\n", "does not list k10s_v1.4.0_darwin_arm64.tar.gz exactly once"},
-		{"a short digest", "v1.4.0", strings.Replace(sums, strings.Repeat("3", 64), strings.Repeat("3", 63), 1), "not a sha256"},
-		{"an upper-case digest", "v1.4.0", strings.Replace(sums, strings.Repeat("1", 64), strings.Repeat("A", 64), 1), "not a sha256"},
-		{"an empty manifest", "v1.4.0", "", "does not list"},
+		{"four version parts", "v9.9.9.1", listing("v9.9.9.1"), "not a release tag"},
+		{"a second line in the tag", "v9.9.9\nv9.9.9", sums, "not a release tag"},
+		{"an archive missing from the manifest", "v9.9.9", drop("linux_arm64"), "does not list k10s_v9.9.9_linux_arm64.tar.gz"},
+		{"an archive listed twice", "v9.9.9", sums + strings.Repeat("6", 64) + "  k10s_v9.9.9_darwin_arm64.tar.gz\n", "does not list k10s_v9.9.9_darwin_arm64.tar.gz exactly once"},
+		{"a short digest", "v9.9.9", strings.Replace(sums, strings.Repeat("3", 64), strings.Repeat("3", 63), 1), "not a sha256"},
+		{"an upper-case digest", "v9.9.9", strings.Replace(sums, strings.Repeat("1", 64), strings.Repeat("A", 64), 1), "not a sha256"},
+		{"an empty manifest", "v9.9.9", "", "does not list"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			out, err := formula(t, "bash", c.tag, c.manifest)

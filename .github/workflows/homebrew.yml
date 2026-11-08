@@ -17,7 +17,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: Release tag, such as v1.4.0
+        description: Release tag, such as vX.Y.Z
         required: true
         type: string
     secrets:
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, such as v1.4.0
+        description: Release tag, such as vX.Y.Z
         required: true
         type: string
 
@@ -81,7 +81,7 @@ jobs:
           # Full releases only: a pre-release in the tap would be offered to
           # every Homebrew user as an upgrade.
           if ! [[ "$TAG" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-            echo "::error::Not a release tag: $(printf '%q' "$TAG"). Expected vMAJOR.MINOR.PATCH, such as v1.4.0."
+            echo "::error::Not a release tag: $(printf '%q' "$TAG"). Expected vMAJOR.MINOR.PATCH."
             exit 1
           fi
           {

@@ -2,8 +2,8 @@
 # Prints the Homebrew formula for one k10s release, the Formula/k10s.rb that
 # p10node/homebrew-tap serves to `brew install p10node/tap/k10s`:
 #
-#   packaging/homebrew/formula.sh v1.4.0 checksums.txt > k10s.rb
-#   just brew-formula v1.4.0 checksums.txt
+#   packaging/homebrew/formula.sh vX.Y.Z checksums.txt > k10s.rb
+#   just brew-formula vX.Y.Z checksums.txt
 #
 # The formula installs the prebuilt archives the release publishes, checked
 # against the sha256 that the release's checksums.txt lists for each, so an

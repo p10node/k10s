@@ -143,7 +143,7 @@ release:
 # `just --set version <tag> release`. .github/workflows/homebrew.yml runs the
 # same script for every release and pushes the result to p10node/homebrew-tap.
 
-# Print the Homebrew formula for a release: `just brew-formula v1.4.0 checksums.txt`
+# Print the Homebrew formula for a release: `just brew-formula vX.Y.Z checksums.txt`
 brew-formula tag sums="dist/checksums.txt":
     packaging/homebrew/formula.sh "{{tag}}" "{{sums}}"
 
