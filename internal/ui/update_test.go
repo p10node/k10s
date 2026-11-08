@@ -439,3 +439,90 @@ func TestTheStartupCheckDoesNotClearAnUnrelatedSpinner(t *testing.T) {
 		t.Error("the background check cleared the spinner off an action still in flight")
 	}
 }
+
+// homebrewModel is a model whose binary was installed by Homebrew.
+func homebrewModel(t *testing.T) *Model {
+	t.Helper()
+	m := updateModel(t)
+	m.updOwner = &update.Owner{Name: "Homebrew", Upgrade: "brew upgrade k10s"}
+	return m
+}
+
+func TestUpdateStepsAsideForAHomebrewInstall(t *testing.T) {
+	for _, known := range []*update.Release{nil, newerRelease()} {
+		m := homebrewModel(t)
+		m.updRel = known
+
+		// The badge's click lands here too.
+		if cmd := m.startUpdate(""); cmd != nil {
+			t.Error("/update on a Homebrew install started a check or an install")
+		}
+		if m.confirm != nil {
+			t.Error("/update offered to install over a Homebrew keg")
+		}
+		if m.busy || m.updBusy {
+			t.Error("/update on a Homebrew install left the UI busy")
+		}
+		if !strings.Contains(m.toast, "brew upgrade k10s") {
+			t.Errorf("toast = %q, want it to name brew upgrade k10s", m.toast)
+		}
+	}
+}
+
+func TestDailyNoticeNamesBrewUpgradeForAHomebrewInstall(t *testing.T) {
+	m := homebrewModel(t)
+
+	m.Update(updateCheckMsg{rel: newerRelease(), newer: true, auto: true})
+	if !strings.Contains(m.toast, "9.9.9") || !strings.Contains(m.toast, "brew upgrade k10s") {
+		t.Errorf("toast = %q, want the new release and brew upgrade k10s", m.toast)
+	}
+	if strings.Contains(m.toast, "/update") {
+		t.Errorf("toast = %q sends a Homebrew install to /update", m.toast)
+	}
+	if m.updateBadge() == "" {
+		t.Error("the status bar stopped showing the waiting release")
+	}
+	if m.confirm != nil {
+		t.Error("the startup check opened a dialog")
+	}
+}
+
+func TestUpdateCheckSettingIsUnchangedForAHomebrewInstall(t *testing.T) {
+	m := homebrewModel(t)
+
+	// The check still runs, so the notice can say brew upgrade.
+	m.updDisabled, m.updLast = false, time.Time{}
+	if m.autoCheckCmd() == nil {
+		t.Error("no startup check for a Homebrew install with the setting on")
+	}
+	m.updDisabled = true
+	if m.autoCheckCmd() != nil {
+		t.Error("update.disabled no longer turns the check off")
+	}
+}
+
+func TestSkipStillWorksForAHomebrewInstall(t *testing.T) {
+	m := homebrewModel(t)
+	m.Update(updateCheckMsg{rel: newerRelease(), newer: true, auto: true})
+
+	m.runSlash("/update skip")
+	if m.updSkip != "9.9.9" {
+		t.Errorf("updSkip = %q, want the release the check found", m.updSkip)
+	}
+	if m.updateBadge() != "" {
+		t.Error("the badge survived being skipped")
+	}
+}
+
+func TestVersionPanelSaysHomebrewUpdatesIt(t *testing.T) {
+	m := homebrewModel(t)
+	m.updRel = newerRelease()
+
+	m.runSlash("/version")
+	body := strings.Join(m.textLines, "\n")
+	for _, want := range []string{"installed   by Homebrew", "9.9.9: run brew upgrade k10s"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/version body missing %q:\n%s", want, body)
+		}
+	}
+}

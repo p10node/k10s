@@ -42,6 +42,9 @@ type Result struct {
 // atomic and never leaves a half-written binary behind: on POSIX the running
 // process keeps its open inode and keeps working, and the next launch is the
 // new build.
+//
+// A binary that a package manager installed is left alone: Apply returns a
+// *ManagedError that names the package manager's own upgrade command.
 func Apply(ctx context.Context, c *Client, rel *Release, progress Progress) (Result, error) {
 	var res Result
 	if rel == nil {
@@ -56,8 +59,13 @@ func Apply(ctx context.Context, c *Client, rel *Release, progress Progress) (Res
 	if err != nil {
 		return res, err
 	}
+	// Before anything is written to the directory: a binary a package
+	// manager installed is that package manager's to replace.
+	if owner := OwnerOf(exe); owner != nil {
+		return res, &ManagedError{Owner: owner}
+	}
 	dir := filepath.Dir(exe)
-	if err := checkWritable(dir); err != nil {
+	if err := probeWritable(dir); err != nil {
 		return res, err
 	}
 	res.Version, res.Path = rel.Version, exe
@@ -137,6 +145,11 @@ func TargetPath() (string, error) {
 	}
 	return exe, nil
 }
+
+// probeWritable is the writability check Apply runs. It is a variable so a
+// test can tell whether Apply got as far as the probe, which writes a
+// temporary file into the directory.
+var probeWritable = checkWritable
 
 // checkWritable turns the failure people actually hit — a binary installed
 // into a root-owned directory — into a sentence that says what to do.
