@@ -86,6 +86,15 @@ publishes the release with generated notes. A hand-written
 manifest format are what the self-updater matches on; `dev.md` has the
 details and the test that catches a mismatch.
 
+Outside this repo, the aqua registry entry
+([aquaproj/aqua-registry#64206](https://github.com/aquaproj/aqua-registry/pull/64206))
+builds each download from the same archive names, and accepts an archive only
+when its attestation was signed by
+`p10node/k10s/.github/workflows/release.yml`. Renaming or moving `release.yml`,
+or changing the archive names, stops aqua from installing the releases that
+follow, so update `pkgs/p10node/k10s/registry.yaml` there before the first
+release that carries the change.
+
 Release builds use the newest patch of the current Go release, not the `go`
 line in `go.mod`: move `go-version` in `release.yml` when a new Go comes out.
 
