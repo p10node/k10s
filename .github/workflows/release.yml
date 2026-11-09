@@ -103,3 +103,20 @@ jobs:
             echo "::warning::no $notes — publishing with generated notes only"
           fi
           gh release create "${{ github.ref_name }}" "${args[@]}" dist/*
+
+  # The Homebrew tap follows every full release: homebrew.yml points
+  # Formula/k10s.rb in p10node/homebrew-tap at the archives published above.
+  # A pre-release tag (one with a hyphen) leaves the tap alone, and without the
+  # HOMEBREW_TAP_TOKEN secret homebrew.yml only leaves a notice, so the release
+  # stands either way.
+  homebrew:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    permissions:
+      contents: read
+      attestations: read
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/p10node/k10s/internal/update"
 )
 
 // An API server that answers with an error is not a cluster, and k10s says
@@ -71,5 +74,23 @@ func TestReadOnlyFlagIsTakenOutWherever(t *testing.T) {
 		if ro != c.ro || strings.Join(rest, " ") != strings.Join(c.rest, " ") {
 			t.Errorf("readOnlyFlag(%q) = %q, %v; want %q, %v", c.in, rest, ro, c.rest, c.ro)
 		}
+	}
+}
+
+// `k10s update` on a Homebrew install says how Homebrew upgrades it, and
+// does nothing else: no release check, no download, nothing written.
+func TestSelfUpdateStepsAsideForAPackageManager(t *testing.T) {
+	t.Setenv("K10S_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	// Were the guard missing, this would stop the release check before it
+	// reached GitHub, with a different error, and still write nothing.
+	t.Setenv(update.RepoEnv, "not-a-repo")
+
+	err := selfUpdate(&update.Owner{Name: "Homebrew", Upgrade: "brew upgrade k10s"})
+	var managed *update.ManagedError
+	if !errors.As(err, &managed) {
+		t.Fatalf("selfUpdate error = %v, want a *update.ManagedError", err)
+	}
+	if want := "installed by Homebrew, which updates it: run brew upgrade k10s"; err.Error() != want {
+		t.Errorf("selfUpdate error = %q, want %q", err, want)
 	}
 }
