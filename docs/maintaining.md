@@ -125,7 +125,8 @@ release the tap missed, and is a no-op for one it already has.
 ## Repository settings
 
 Admin-only, outside the repo, so listed here. #16 is where they were asked
-for.
+for. The `HOMEBREW_TAP_TOKEN` secret is admin-only too; [The Homebrew
+tap](#the-homebrew-tap) says what it holds.
 
 | Setting                                | Where                        | Why                                                                                        |
 |----------------------------------------|------------------------------|--------------------------------------------------------------------------------------------|
@@ -133,6 +134,3 @@ for.
 | Workflow token read-only               | Settings → Actions → General | `release.yml` asks for what it needs itself; `test.yml` only reads                         |
 | Private vulnerability reporting        | Settings → Advanced Security | A security bug can be reported without a public issue                                      |
 | The two rulesets                       | Settings → Rulesets          | See above                                                                                  |
-
-The `HOMEBREW_TAP_TOKEN` secret is admin-only too; [The Homebrew
-tap](#the-homebrew-tap) says what it holds.
