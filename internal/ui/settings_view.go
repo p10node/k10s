@@ -53,7 +53,7 @@ func (m *Model) overlaySettings(root Block) Block {
 		row := st(th.Accent).Render(lead(ci)) + st(th.Subtle).Render(fmt.Sprintf("%-9s", "custom"))
 		if m.setEditing && m.setRow == ci {
 			m.input.Width = inner - 16
-			row += m.input.View()
+			row += m.inputView()
 		} else {
 			label := "—"
 			if !isPreset(m.cli) && m.cli != "" {
