@@ -175,6 +175,7 @@ ClusterRoleBindings · Nodes · Namespaces · Events · CRDs · Custom Resources
 | `y` YAML                           | the live object                                                   |
 | `l` logs                           | **follows** (`-f`), newest at the bottom, scroll back 500 lines   |
 | `s` shell                          | a real interactive exec session - raw TTY, resize-aware, in-panel |
+| `S` shell (terminal)               | quits k10s into the same shell, in your own terminal              |
 | `p` port-forward                   | real SPDY forward, start/stop from the pane                       |
 | `m` top                            | pod/node metrics, per container, with requests vs limits          |
 | `e` edit · `r` restart · `c` scale | rollout restart, scale, `$EDITOR`                                 |
