@@ -1,17 +1,20 @@
 # Install
 
-Four ways in, all landing on the same static binary.
+Five ways in, all landing on the same static binary.
 
 | Method           | Command                                                            | Notes                                          |
 |------------------|--------------------------------------------------------------------|------------------------------------------------|
 | Installer script | `curl -fsSL https://p10node.com/k10s/install.sh \| sh`             | macOS + Linux, checksum-verified, no Go needed |
+| Homebrew         | `brew install p10node/tap/k10s`                                    | macOS + Linux, prebuilt, `brew upgrade k10s`   |
 | Go               | `go install github.com/p10node/k10s@latest`                        | needs Go 1.26+                                 |
 | From a clone     | `just install`                                                     | stamps the version from `git describe`         |
 | Release archive  | download from [releases](https://github.com/p10node/k10s/releases) | the only route on Windows                      |
 
 After the first install, every later upgrade is `k10s update` — the binary
 replaces itself, checksum-verified, and offers to restart. See
-[update.md](update.md).
+[update.md](update.md). A Homebrew install is the exception: `brew upgrade
+k10s` upgrades it, and `k10s update` says so instead of writing over
+Homebrew's copy.
 
 ## The installer script
 
@@ -91,6 +94,69 @@ tagged commit. With the GitHub CLI:
 ```bash
 gh attestation verify k10s_${tag}_darwin_arm64.tar.gz --repo p10node/k10s
 ```
+
+## Homebrew
+
+```bash
+brew install p10node/tap/k10s
+```
+
+The formula lives in [p10node/homebrew-tap](https://github.com/p10node/homebrew-tap)
+and installs the release's prebuilt archive for the machine (macOS or Linux,
+`arm64` or `amd64`), checked against the sha256 that the release's
+`checksums.txt` lists for it. There is nothing to build and no Go to install.
+`brew upgrade k10s` moves it to the next release; what `k10s update` and
+`/update` do on a Homebrew install is in
+[update.md](update.md#package-managers).
+
+Every full release updates the formula on its own: the release workflow
+checks each archive's checksum and build provenance attestation, then pushes
+the new `Formula/k10s.rb` to the tap. A pre-release never reaches it.
+
+### Tap trust
+
+Since Homebrew 6.0.0, a formula from a tap that is not Homebrew's own loads
+only once it is trusted ([Tap Trust](https://docs.brew.sh/Tap-Trust)).
+Installing by the full name, as above, trusts that one formula and nothing
+else in the tap, so the one-liner needs no other step, and `brew upgrade`
+keeps working after it.
+
+Installing by the short name needs the trust step first:
+
+```bash
+brew tap p10node/tap
+brew trust --formula p10node/tap/k10s
+brew install k10s
+```
+
+In a Brewfile, the `trusted: true` option of
+[Homebrew Bundle](https://docs.brew.sh/Brew-Bundle-and-Brewfile#trusted) does
+the same:
+
+```ruby
+brew "p10node/tap/k10s", trusted: true
+```
+
+Without it, Homebrew stops with "Refusing to load formula p10node/tap/k10s
+from untrusted tap p10node/tap". That reads like a broken formula, but it is
+the trust check: `brew trust --formula p10node/tap/k10s` once is enough.
+
+### Coming from the installer script
+
+`install.sh` puts its binary in `/usr/local/bin` or `/opt/homebrew/bin`,
+Homebrew's own `bin` on Intel and on Apple silicon Macs, when that directory
+is writable, and `brew install` then stops at the link step ("Possible
+conflicting files"), leaving the old copy first on `PATH`. Remove it before
+switching:
+
+```bash
+curl -fsSL https://p10node.com/k10s/uninstall.sh | sh
+brew install p10node/tap/k10s
+```
+
+The other way round, use `brew uninstall k10s`. `uninstall.sh` does not know
+about Homebrew: on a Homebrew install it would delete the `bin/k10s` link and
+leave the formula installed.
 
 ## Hosting the short URL
 

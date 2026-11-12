@@ -239,3 +239,107 @@ func TestExecCommandOverridesExistingPluginEnvironmentValues(t *testing.T) {
 		t.Errorf("USER = %q, want kubeconfig identity", out)
 	}
 }
+
+func TestShellCodeMarksWhatTheShellMayRunAsCode(t *testing.T) {
+	// One mark per argument: c when it gets plugin values through the
+	// environment, - when it gets them as text.
+	for _, tc := range []struct {
+		command string
+		args    []string
+		marks   string
+	}{
+		// The -c script, and the options before it.
+		{"sh", []string{"-c", "script", "sh", "$NAME"}, "cc--"},
+		{"/bin/sh", []string{"-ec", "script"}, "cc"},
+		{"bash.exe", []string{"-lc", "script"}, "cc"},
+		{"sh", []string{"-c", "-x", "script", "sh"}, "ccc-"},
+		{"sh", []string{"-c", "-o", "errexit", "script"}, "cccc"},
+		{"sh", []string{"-o", "errexit", "-c", "script", "sh", "$NAME"}, "cccc--"},
+		{"bash", []string{"-euxo", "pipefail", "-c", "script"}, "cccc"},
+		{"sh", []string{"-co", "errexit", "script", "sh"}, "ccc-"},
+		{"sh", []string{"+x", "-c", "script"}, "ccc"},
+		{"sh", []string{"+c", "script", "sh"}, "cc-"},
+		{"sh", []string{"-c", "--", "script", "sh"}, "ccc-"},
+		{"sh", []string{"-c", "-", "script"}, "ccc"},
+		{"bash", []string{"--norc", "--noprofile", "-c", "script"}, "cccc"},
+		{"bash", []string{"--rcfile", "rc", "-c", "script", "bash"}, "cccc-"},
+		// A shell run through env or busybox.
+		{"env", []string{"bash", "-c", "script", "bash"}, "-cc-"},
+		{"/usr/bin/env", []string{"-i", "PATH=/bin", "sh", "-c", "script"}, "---cc"},
+		{"env", []string{"-u", "HOME", "--", "A=$NAME", "sh", "-c", "script"}, "-----cc"},
+		{"busybox", []string{"sh", "-c", "script", "sh"}, "-cc-"},
+		{"env", []string{"busybox", "ash", "-c", "script"}, "--cc"},
+		{"env", []string{"-C", "/tmp", "sh", "-c", "script"}, "---cc"},
+		{"env", []string{"-iu", "HOME", "sh", "-c", "script"}, "---cc"},
+		{"env", []string{"-iuS", "sh", "-c", "script"}, "--cc"},
+		// No -c script: a script file and its arguments, or not a shell.
+		{"sh", []string{"script.sh", "$NAME"}, "--"},
+		{"sh", []string{"script.sh", "-c", "$NAME"}, "---"},
+		{"sh", []string{"-c"}, "-"},
+		{"python3", []string{"-c", "print('$NAME')"}, "--"},
+		{"env", []string{"python3", "-c", "x"}, "---"},
+		{"env", []string{"-C", "/tmp", "python3", "x.py", "$NAME"}, "-----"},
+		// env -S builds a command line of its own and expands ${VAR} in it:
+		// a program reading its own command line, like python3 -c.
+		{"env", []string{"-S", "sh -c script"}, "--"},
+		{"env", []string{"-vS", "sh -c script"}, "--"},
+		{"env", []string{"--split-string=sh -c script"}, "-"},
+		// Options k10s cannot read with certainty: every argument.
+		{"bash", []string{"-O", "extglob", "-c", "script", "bash", "$NAME"}, "cccccc"},
+		{"sh", []string{"-oc", "errexit", "script"}, "ccc"},
+		{"sh", []string{"-c", "-o"}, "cc"},
+		{"zsh", []string{"--no-rcs", "-c", "script"}, "ccc"},
+		{"sh", []string{"+", "-c", "script"}, "ccc"},
+		{"env", []string{"-x", "sh", "-c", "script"}, "cccc"},
+	} {
+		var got strings.Builder
+		for _, code := range shellCode(tc.command, tc.args) {
+			if code {
+				got.WriteByte('c')
+			} else {
+				got.WriteByte('-')
+			}
+		}
+		if got.String() != tc.marks {
+			t.Errorf("%s %q: marks %s, want %s", tc.command, tc.args, got.String(), tc.marks)
+		}
+	}
+}
+
+func TestShellOptionsAfterDashCDoNotLetValuesIntoTheScript(t *testing.T) {
+	script := `printf '%s' "$COL-STATUS" > "$OUT"`
+	for _, tc := range []struct {
+		command string
+		args    []string
+	}{
+		{"sh", []string{"-c", "-x", script}},
+		{"sh", []string{"-c", "-o", "errexit", script}},
+		{"sh", []string{"-c", "--", script}},
+		{"sh", []string{"+x", "-c", script}},
+		{"bash", []string{"-euo", "pipefail", "-c", script}},
+		{"env", []string{"sh", "-c", script}},
+	} {
+		t.Run(tc.command+" "+strings.Join(tc.args[:len(tc.args)-1], " "), func(t *testing.T) {
+			dir := t.TempDir()
+			out := filepath.Join(dir, "out")
+			pwned := filepath.Join(dir, "pwned")
+			t.Setenv("OUT", out)
+			payload := `"; touch ` + pwned + `; # $(touch ignored)`
+			p := Plugin{Command: tc.command, Args: tc.args}
+
+			if err := p.ExecCommand(Vars{Columns: map[string]string{"STATUS": payload}}).Run(); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if _, err := os.Stat(pwned); !os.IsNotExist(err) {
+				t.Fatalf("cluster value was reparsed as shell syntax; pwned stat err=%v", err)
+			}
+			got, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != payload {
+				t.Errorf("shell received %q, want literal payload %q", got, payload)
+			}
+		})
+	}
+}

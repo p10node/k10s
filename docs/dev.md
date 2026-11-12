@@ -150,7 +150,11 @@ just release           # or build the same archives locally into dist/
 
 `.github/workflows/release.yml` runs the tests, cross-compiles
 `darwin/{amd64,arm64}`, `linux/{amd64,arm64}` and `windows/amd64`, writes
-`checksums.txt`, and publishes everything with generated notes.
+`checksums.txt`, and publishes everything with generated notes. A full
+release then updates the Homebrew formula, through
+`.github/workflows/homebrew.yml` and `packaging/homebrew/formula.sh`, which
+reads the same archive names and manifest; see
+[maintaining.md](maintaining.md#the-homebrew-tap).
 
 The archive names (`k10s_<version>_<os>_<arch>.tar.gz`, `.zip` on Windows)
 and the `sha256sum`-format manifest are what the self-updater matches on and

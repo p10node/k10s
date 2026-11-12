@@ -86,8 +86,21 @@ publishes the release with generated notes. A hand-written
 manifest format are what the self-updater matches on; `dev.md` has the
 details and the test that catches a mismatch.
 
+Outside this repo, the aqua registry entry
+([aquaproj/aqua-registry#64206](https://github.com/aquaproj/aqua-registry/pull/64206))
+builds each download from the same archive names, and accepts an archive only
+when its attestation was signed by
+`p10node/k10s/.github/workflows/release.yml`. Renaming or moving `release.yml`,
+or changing the archive names, stops aqua from installing the releases that
+follow, so update `pkgs/p10node/k10s/registry.yaml` there before the first
+release that carries the change.
+
 Release builds use the newest patch of the current Go release, not the `go`
 line in `go.mod`: move `go-version` in `release.yml` when a new Go comes out.
+
+Releases are tagged on `main`, with no release branches, so a fix (a security
+fix too) ships in the next release, never as a patch to an older one.
+[SECURITY.md](../SECURITY.md) tells reporters the same.
 
 Check a published archive with:
 
@@ -95,10 +108,38 @@ Check a published archive with:
 gh attestation verify k10s_<tag>_<os>_<arch>.tar.gz --repo p10node/k10s
 ```
 
+### The Homebrew tap
+
+`brew install p10node/tap/k10s` reads `Formula/k10s.rb` from
+[p10node/homebrew-tap](https://github.com/p10node/homebrew-tap), and nobody
+edits that file by hand. After the release job, `release.yml` calls
+`.github/workflows/homebrew.yml`, which:
+
+1. refuses anything but a full release tag (`vMAJOR.MINOR.PATCH`) whose
+   release is published and is neither a draft nor a pre-release;
+2. downloads the four macOS and Linux archives and `checksums.txt`, and
+   checks each archive against its checksum and against the build
+   provenance attestation `release.yml` signed for that tag;
+3. writes the formula with `packaging/homebrew/formula.sh` (`just
+   brew-formula <tag> <checksums.txt>` prints the same thing locally);
+4. leaves the tap alone when it already has that version or a newer one, and
+   otherwise commits `k10s <version>` to the tap's `main` and pushes it.
+
+The push uses `HOMEBREW_TAP_TOKEN`, a repository secret (Settings > Secrets
+and variables > Actions) that holds a fine-grained personal access token:
+resource owner p10node, repository access to p10node/homebrew-tap only, and
+one repository permission, Contents: read and write. Without the secret a
+release still goes out, and the run carries a notice that the tap was not
+updated. When the token expires, the homebrew job fails and the release
+still stands. Either way, set or renew the secret, then run the workflow by
+hand (Actions > homebrew > Run workflow) with the tag: that picks up a
+release the tap missed, and is a no-op for one it already has.
+
 ## Repository settings
 
 Admin-only, outside the repo, so listed here. #16 is where they were asked
-for.
+for. The `HOMEBREW_TAP_TOKEN` secret is admin-only too; [The Homebrew
+tap](#the-homebrew-tap) says what it holds.
 
 | Setting                                | Where                        | Why                                                                                        |
 |----------------------------------------|------------------------------|--------------------------------------------------------------------------------------------|
@@ -106,3 +147,6 @@ for.
 | Workflow token read-only               | Settings → Actions → General | `release.yml` asks for what it needs itself; `test.yml` only reads                         |
 | Private vulnerability reporting        | Settings → Advanced Security | A security bug can be reported without a public issue                                      |
 | The two rulesets                       | Settings → Rulesets          | See above                                                                                  |
+
+[SECURITY.md](../SECURITY.md) is the reporter's side of private vulnerability
+reporting; GitHub shows it above the report form.

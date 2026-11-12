@@ -13,6 +13,19 @@ updates:
     # every week to catch a vulnerable one instead.
     allow:
       - dependency-type: direct
+    # Dependabot updates a group one module at a time, and a newer
+    # k8s.io/api alone can lack an alpha API the older client-go imports,
+    # so go mod tidy fails (v0.37.2 dropped scheduling/v1alpha2, which
+    # client-go v0.36.4 uses; runs 41142937813, 42016449136). client-go
+    # requires the matching k8s.io/api, so it still moves with the group.
+    # dependabot-core drops an ignore's update types for security updates,
+    # keeping only version ranges, so a security update can still come.
+    ignore:
+      - dependency-name: "k8s.io/api"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     groups:
       # client-go and the other k8s.io modules are released together and
       # have to move together.

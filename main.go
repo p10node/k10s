@@ -85,7 +85,7 @@ func main() {
 			fmt.Println(version.String())
 			return
 		case "update", "--update", "upgrade", "self-update":
-			if err := selfUpdate(); err != nil {
+			if err := selfUpdate(update.InstalledBy()); err != nil {
 				fmt.Fprintln(os.Stderr, "k10s:", err)
 				os.Exit(1)
 			}
@@ -97,6 +97,12 @@ func main() {
 	}
 
 	k8s.SilenceLogging()
+	// Credential plugins (tsh, aws, kubelogin) write to whatever os.Stderr
+	// is when the first client is built. From here on that is a pipe k10s
+	// reads, so a plugin's complaint reaches the No cluster panel instead of
+	// the raw terminal under the TUI; the terminal itself goes only to
+	// processes that are meant to have it.
+	terminal := k8s.CaptureStderr()
 	// Before the first connection: only clients built after this carry the
 	// guard.
 	if readOnly {
@@ -120,16 +126,21 @@ func main() {
 	}
 
 	m := ui.NewStartup(ui.Startup{
-		Kinds:    k8s.Kinds(),
-		Contexts: ctxNames,
-		Context:  curCtx,
-		Connect:  newSource,
-		ReadOnly: readOnly,
+		Kinds:            k8s.Kinds(),
+		Contexts:         ctxNames,
+		Context:          curCtx,
+		Connect:          newSource,
+		ReadOnly:         readOnly,
+		CredentialPlugin: func(ctx string) string { return k8s.CredentialPlugin("", ctx) },
+		TerminalStderr:   terminal,
 	})
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "k10s:", err)
+	_, runErr := p.Run()
+	// The TUI is gone; whatever is said from here belongs on the screen.
+	k8s.ReleaseStderr()
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "k10s:", runErr)
 		os.Exit(1)
 	}
 
@@ -150,7 +161,14 @@ func main() {
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
 // with a progress line instead of a modal.
-func selfUpdate() error {
+//
+// owner is the package manager that installed this binary, if one did. Then
+// nothing is checked or written, and the error names that package manager's
+// upgrade command, so `k10s update` exits non-zero with it.
+func selfUpdate(owner *update.Owner) error {
+	if owner != nil {
+		return &update.ManagedError{Owner: owner}
+	}
 	cfg, _ := config.Load()
 	c := &update.Client{Repo: cfg.Update.Repo}
 
@@ -220,10 +238,11 @@ usage:
                     needed) — k10s never shows this unless you ask for it
   k10s --readonly   look, never touch: no edit, scale, restart, cordon,
                     drain or delete, no shell or port-forward, and no
-                    dangerous plugins or typed shell commands. Every
+                    external plugins or typed shell commands. Every
                     request that could change the cluster is refused before
                     it leaves the machine. Works with demo too.
   k10s update       install the newest release over this binary
+                    (a Homebrew install says to run brew upgrade k10s)
   k10s --version    print the running build
   k10s --help       this text
 
