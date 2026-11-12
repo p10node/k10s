@@ -70,6 +70,9 @@ const (
 	AYAML     = "yaml"
 	ALogs     = "logs"
 	AShell    = "shell"
+	// AShellOut quits k10s and runs the pod shell in the terminal k10s was
+	// started from.
+	AShellOut = "shellout"
 	APortFwd  = "portfwd"
 	ARestart  = "restart"
 	AEdit     = "edit"
@@ -154,9 +157,10 @@ type Source interface {
 	Drain(name string) error
 	Apply(kind, ns, name, yaml string) error
 
-	// Shell returns a process the UI can hand the terminal to via
-	// tea.ExecProcess (nil, nil if the backend has no real shell — the UI
-	// then falls back to a toast).
+	// Shell returns a process that runs the shell on a real terminal. S
+	// quits k10s and main.go runs it in the terminal k10s was started from
+	// (nil, nil if the backend has no real shell — the UI then falls back to
+	// a toast).
 	Shell(kind, ns, name string) (tea.ExecCommand, error)
 	// ShellSession opens an interactive shell the UI can render *inside* a
 	// panel rather than by handing over the whole terminal. Returns

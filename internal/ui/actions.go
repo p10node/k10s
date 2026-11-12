@@ -23,6 +23,8 @@ var Actions = []Action{
 	{domain.AYAML, "y", "YAML", "󰈮", false},
 	{domain.ALogs, "l", "Logs", "󰑍", false},
 	{domain.AShell, "s", "Shell", "", false},
+	// "S" quits k10s into the same shell in the real terminal.
+	{domain.AShellOut, "S", "Shell (terminal)", "", false},
 	// "p" for port-forward: "f" is now the find/search key.
 	{domain.APortFwd, "p", "Port Forward", "󰛳", false},
 	{domain.ARestart, "r", "Rollout Restart", "󰑐", false},

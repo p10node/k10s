@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	kterm "k8s.io/kubectl/pkg/util/term"
 	"k8s.io/streaming/pkg/httpstream"
+
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // newExecutor builds the executor every exec path uses: WebSocket first,
@@ -119,15 +121,16 @@ func (a sizeQueueAdapter) Next() *remotecommand.TerminalSize {
 	return &remotecommand.TerminalSize{Width: s.Width, Height: s.Height}
 }
 
-// Shell returns an interactive exec session into the pod's first container,
-// handed to the UI via tea.ExecProcess.
+// Shell returns an interactive exec session for the real terminal, into the
+// same pod and container ShellSession picks: a pod is itself, a workload
+// resolves to one of its pods.
 func (s *Store) Shell(kind, ns, name string) (tea.ExecCommand, error) {
-	if kind != "pods" {
-		return nil, fmt.Errorf("shell is only available for pods")
-	}
-	container, err := s.podContainer(ns, name)
+	pod, container, err := s.logTarget(kind, ns, name)
 	if err != nil {
+		if err == domain.ErrNoLogs {
+			return nil, domain.ErrNoShell
+		}
 		return nil, err
 	}
-	return &execCommand{store: s, ns: effectiveNS(ns), pod: name, container: container, shellCmd: shellCmd}, nil
+	return &execCommand{store: s, ns: effectiveNS(ns), pod: pod, container: container, shellCmd: shellCmd}, nil
 }

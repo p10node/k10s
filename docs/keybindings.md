@@ -109,6 +109,7 @@ nothing greyed out.
 | `y` | YAML                                        | all except events                     |
 | `l` | Logs (follows live)                         | pods, workloads, jobs                 |
 | `s` | Shell — real interactive exec               | pods                                  |
+| `S` | Shell (terminal) — **quits k10s** into it   | pods                                  |
 | `p` | Port Forward — real, toggles                | pods, services                        |
 | `r` | Rollout Restart                             | deployments, statefulsets, daemonsets |
 | `c` | Scale — opens `:scale <n>`                  | deployments, statefulsets, replicasets|
@@ -152,6 +153,10 @@ keys win unless the plugin sets `override: true`; see [plugins.md](plugins.md).
 | `ctrl+]`  | detach and return to the table                      |
 
 The shell renders inside the main panel, so the rest of k10s stays visible.
+
+`S` on the table is the other way in: it **quits k10s** and runs the same
+shell in the terminal you started k10s from. Exit the shell to get your
+prompt back. Inside the in-panel shell `S` is just a key for the pod.
 
 ## Command box
 

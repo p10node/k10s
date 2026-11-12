@@ -32,7 +32,7 @@ func TestReadOnlyActionsPaneListsOnlyReads(t *testing.T) {
 }
 
 func TestReadOnlyRefusesWriteKeysBeforeAnyDialog(t *testing.T) {
-	for _, k := range []string{"D", "e", "s", "p"} {
+	for _, k := range []string{"D", "e", "s", "S", "p"} {
 		m := newReadOnlyModel(t)
 		m.handleKey(key(k))
 		if m.confirm != nil {

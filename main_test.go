@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	utilexec "k8s.io/client-go/util/exec"
 
 	"github.com/p10node/k10s/internal/update"
 )
@@ -92,5 +94,33 @@ func TestSelfUpdateStepsAsideForAPackageManager(t *testing.T) {
 	}
 	if want := "installed by Homebrew, which updates it: run brew upgrade k10s"; err.Error() != want {
 		t.Errorf("selfUpdate error = %q, want %q", err, want)
+	}
+}
+
+// runCmd is an exec command whose Run returns err.
+type runCmd struct{ err error }
+
+func (runCmd) SetStdin(io.Reader)  {}
+func (runCmd) SetStdout(io.Writer) {}
+func (runCmd) SetStderr(io.Writer) {}
+func (c runCmd) Run() error        { return c.err }
+
+// After S, k10s exits with the pod shell's own exit code, the way
+// `kubectl exec -it` does, and with 1 only when the session itself failed.
+func TestRunExitShellExitsWithTheShellsCode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"shell exited cleanly", nil, 0},
+		{"shell exited 3", utilexec.CodeExitError{Err: errors.New("command terminated with exit code 3"), Code: 3}, 3},
+		{"session failed", errors.New("unable to upgrade connection"), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runExitShell(runCmd{tc.err}, "po/web-1 (namespace default)"); got != tc.want {
+				t.Errorf("exit code = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
+	utilexec "k8s.io/client-go/util/exec"
 
 	"github.com/p10node/k10s/internal/config"
 	"github.com/p10node/k10s/internal/domain"
@@ -133,6 +135,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set when the user pressed S. Run tears the alt screen down, so the pod
+	// shell gets the plain terminal k10s was started from, and k10s exits
+	// with the shell's exit code.
+	if c, target := m.ExitShell(); c != nil {
+		if code := runExitShell(c, target); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
+
 	// Set when the user accepted the restart offer after /update installed a
 	// new binary. zone.Close has already run via defer order, and the alt
 	// screen is torn down by Run, so the exec lands in a clean terminal.
@@ -146,6 +158,29 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// runExitShell runs the shell S asked for on this process's terminal and
+// returns the code to exit with: the remote shell's own, or 1 when the
+// session failed.
+func runExitShell(c tea.ExecCommand, target string) int {
+	c.SetStdin(os.Stdin)
+	c.SetStdout(os.Stdout)
+	c.SetStderr(os.Stderr)
+	fmt.Fprintf(os.Stderr, "k10s: shell into %s — exit the shell to get your prompt back\n", target)
+
+	err := c.Run()
+	if err == nil {
+		return 0
+	}
+	// remotecommand reports a non-zero exit of the remote shell as a
+	// CodeExitError. That is the shell's result, not a k10s failure.
+	var exit utilexec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitStatus()
+	}
+	fmt.Fprintln(os.Stderr, "k10s:", err)
+	return 1
 }
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
