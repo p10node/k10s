@@ -98,6 +98,10 @@ release that carries the change.
 Release builds use the newest patch of the current Go release, not the `go`
 line in `go.mod`: move `go-version` in `release.yml` when a new Go comes out.
 
+Releases are tagged on `main`, with no release branches, so a fix (a security
+fix too) ships in the next release, never as a patch to an older one.
+[SECURITY.md](../SECURITY.md) tells reporters the same.
+
 Check a published archive with:
 
 ```bash
@@ -143,3 +147,6 @@ tap](#the-homebrew-tap) says what it holds.
 | Workflow token read-only               | Settings → Actions → General | `release.yml` asks for what it needs itself; `test.yml` only reads                         |
 | Private vulnerability reporting        | Settings → Advanced Security | A security bug can be reported without a public issue                                      |
 | The two rulesets                       | Settings → Rulesets          | See above                                                                                  |
+
+[SECURITY.md](../SECURITY.md) is the reporter's side of private vulnerability
+reporting; GitHub shows it above the report form.
