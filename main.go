@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -140,7 +142,7 @@ func main() {
 	// The TUI is gone; whatever is said from here belongs on the screen.
 	k8s.ReleaseStderr()
 	if runErr != nil {
-		fmt.Fprintln(os.Stderr, "k10s:", runErr)
+		tuiFailed(os.Stderr, runErr)
 		os.Exit(1)
 	}
 
@@ -158,6 +160,21 @@ func main() {
 		}
 	}
 }
+
+// tuiFailed reports the error the TUI ended with. After a panic it first
+// writes what the stderr pipe caught: Bubble Tea prints the panic itself to
+// stdout but its stack trace to os.Stderr, which was the pipe until Run
+// returned, and a crash report needs the trace to say where it happened.
+func tuiFailed(w io.Writer, runErr error) {
+	if errors.Is(runErr, tea.ErrProgramPanic) {
+		_, _ = w.Write(drainStderr(time.Second))
+	}
+	fmt.Fprintln(w, "k10s:", runErr)
+}
+
+// drainStderr is k8s.DrainStderr. A variable so a test can stand in for the
+// pipe, which a process captures only once.
+var drainStderr = k8s.DrainStderr
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
 // with a progress line instead of a modal.

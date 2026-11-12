@@ -58,16 +58,24 @@ func nonInteractive(ep *clientcmdapi.ExecConfig) {
 }
 
 // stderrTap is os.Stderr rerouted through a pipe k10s reads (rule 2). It
-// remembers only the last non-empty line and when it arrived: plugins say
-// one useful thing, at the end, and a message from a different attempt
-// must not be pinned on this one.
+// remembers the last non-empty line and when it arrived: plugins say one
+// useful thing, at the end, and a message from a different attempt must not
+// be pinned on this one. It also keeps the last tailSize bytes as they were
+// written, for the one reader that needs more than a line: main, after a
+// panic in the TUI, whose stack trace Bubble Tea writes to os.Stderr.
 type stderrTap struct {
 	mu       sync.Mutex
 	terminal *os.File // what os.Stderr was before the swap
 	pipe     *os.File // the write end now in os.Stderr
 	last     string
 	at       time.Time
+	tail     []byte        // the last tailSize bytes read, lines as written
+	done     chan struct{} // closed when the reader stops
 }
+
+// tailSize bounds stderrTap.tail. A stack trace from inside Bubble Tea is a
+// few KiB.
+const tailSize = 64 << 10
 
 var (
 	captureOnce sync.Once
@@ -81,17 +89,20 @@ func (t *stderrTap) start() error {
 		return err
 	}
 	t.terminal, t.pipe = os.Stderr, w
+	t.done = make(chan struct{})
 	os.Stderr = w
 	go func() {
+		defer close(t.done)
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if line == "" {
-				continue
-			}
+			raw := sc.Text()
+			line := strings.TrimSpace(raw)
 			t.mu.Lock()
-			t.last, t.at = line, time.Now()
+			t.keep(raw)
+			if line != "" {
+				t.last, t.at = line, time.Now()
+			}
 			t.mu.Unlock()
 		}
 		// A line too long for the buffer ends the scan; nothing to do about
@@ -100,6 +111,32 @@ func (t *stderrTap) start() error {
 		_ = r.Close()
 	}()
 	return nil
+}
+
+// keep adds one line, as written, to the tail and drops the oldest bytes
+// past tailSize. The caller holds t.mu.
+func (t *stderrTap) keep(line string) {
+	t.tail = append(append(t.tail, line...), '\n')
+	if over := len(t.tail) - tailSize; over > 0 {
+		t.tail = append(t.tail[:0], t.tail[over:]...)
+	}
+}
+
+// drain closes the write end, so that the reader can finish what is still in
+// the pipe, and returns the tail once it has, or once wait is up: a
+// credential plugin that is still running holds the pipe open too.
+func (t *stderrTap) drain(wait time.Duration) []byte {
+	if t.pipe == nil {
+		return nil
+	}
+	_ = t.pipe.Close()
+	select {
+	case <-t.done:
+	case <-time.After(wait):
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.tail...)
 }
 
 // said returns the last line written at or after since, "" if none. The
@@ -146,6 +183,16 @@ func ReleaseStderr() {
 	if tap.terminal != nil {
 		os.Stderr = tap.terminal
 	}
+}
+
+// DrainStderr ends the capture and returns the last 64 KiB of what it read,
+// byte for byte, for main when the TUI ended in a panic: Bubble Tea prints
+// the panic to stdout but its stack trace to os.Stderr, which was the pipe.
+// It waits up to wait for the pipe to empty. Call it after ReleaseStderr, at
+// the end of the process: a credential plugin started after it would find
+// its stderr closed. Without a capture it returns nil.
+func DrainStderr(wait time.Duration) []byte {
+	return tap.drain(wait)
 }
 
 // TerminalStderr is the terminal's stderr whether or not CaptureStderr has
