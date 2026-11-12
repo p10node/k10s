@@ -147,6 +147,60 @@ A `401`/`403` is **not** treated as "no cluster": that is a live cluster
 refusing your credentials, a different problem with a different fix, and
 k10s connects anyway so you can see whatever you are allowed to see.
 
+A third failure gets its own wording, because its fix is different again:
+
+3. **The credential plugin failed.** See the next section.
+
+## Credential plugins (tsh, aws, gke-gcloud-auth-plugin, kubelogin)
+
+Many kubeconfigs do not hold a token. The user entry names a program
+(`exec:`) that fetches one, and client-go runs it before the first request:
+`tsh kube credentials` for Teleport, `aws eks get-token`, `kubelogin` for
+AKS, `gke-gcloud-auth-plugin`.
+
+Under `kubectl` that program shares the terminal, so it can print "tap your
+security key" and read an MFA code. Under a TUI it cannot: k10s owns the
+keyboard, a prompt would swallow keystrokes meant for k10s, and whatever the
+plugin printed would land on top of the frame. That is where k9s hangs
+([derailed/k9s#2048](https://github.com/derailed/k9s/issues/2048)), with
+`kill -9` as the way out.
+
+k10s does two things instead:
+
+- **The plugin never gets the terminal.** It runs with stdin marked
+  unavailable — what `kubectl exec -i` does — so a plugin that needs to
+  prompt fails at once rather than waiting for input nobody can type. One
+  that declares `interactiveMode: Always` is refused before it runs.
+- **What it said is what you see.** The plugin's stderr goes to k10s, not
+  the screen, and its last line is the reason under **No cluster**:
+
+  ```
+  credential plugin tsh: Having problems with relogin, please use 'tsh login/tsh kube login' manually
+  ```
+
+The fix is in another shell: `tsh login` or `tsh kube login <cluster>`,
+`aws sso login`, `az login` — whatever the message names — then `r`.
+Credentials the plugin caches (tsh keeps certificates under `~/.tsh`) are
+picked up on the retry.
+
+A plugin that takes a while (minting a certificate, calling STS) does not
+cost you the connection: its run time is spent inside the first request's
+timeout, which client-go cannot interrupt, so k10s retries that one request
+once with the credentials now cached.
+
+**Teleport.** Two setups do not fit the exec plugin at all, and `tsh` says
+so: per-session MFA, whose certificates last about a minute, and a proxy
+behind an L7 load balancer, which refuses direct Kubernetes clients. Both
+are what `tsh proxy kube` is for. It keeps the session in its own terminal
+and writes a kubeconfig into `$KUBECONFIG`:
+
+```bash
+tsh proxy kube <cluster> --exec   # opens a shell with KUBECONFIG set
+k10s                              # inside that shell
+```
+
+`:ctx` then lists only what that kubeconfig holds.
+
 ## Related
 
 - [backends.md](backends.md) — the live backend, the demo backend, and what

@@ -6,6 +6,7 @@ package k8s
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -96,6 +97,9 @@ func New(path, context string) (*Client, error) {
 	}
 	restCfg.QPS = 50
 	restCfg.Burst = 100
+	// A plugin that prompts would be prompting a terminal the TUI owns. See
+	// credplugin.go.
+	nonInteractive(restCfg.ExecProvider)
 	// Before any client is built from it, so every one of them, and the
 	// discovery copy below, carries the guard.
 	if readOnly.Load() {
@@ -116,7 +120,7 @@ func New(path, context string) (*Client, error) {
 	// itself: that config also backs the informers' long-lived list-watch
 	// connections, which a blanket per-request timeout would kill.
 	discoCfg := *restCfg
-	discoCfg.Timeout = 10 * time.Second
+	discoCfg.Timeout = discoveryTimeout
 	disco, err := discovery.NewDiscoveryClientForConfig(&discoCfg)
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
@@ -146,12 +150,49 @@ func New(path, context string) (*Client, error) {
 		CurrentContext: cur,
 		Server:         restCfg.Host,
 	}
-	if v, err := disco.ServerVersion(); err == nil {
+	c.probe(disco)
+	return c, nil
+}
+
+// discoveryTimeout bounds the one-shot discovery GETs. A variable so a test
+// can make it short.
+var discoveryTimeout = 10 * time.Second
+
+// probe asks the API server its version: the one request New makes, and so
+// the only evidence that there is a cluster at the other end at all (see
+// Reachable).
+//
+// A credential plugin runs inside that request's timeout. client-go runs it
+// before sending and cannot interrupt it, so a plugin that takes its time —
+// tsh minting a certificate, aws calling STS — spends the budget, and the
+// request itself then fails with "context deadline exceeded" even though
+// the plugin succeeded. Its credentials are cached by then, so one more try
+// is the network alone. Without it the user sees No cluster and presses r,
+// which does the same thing by hand (gravitational/teleport#49622 is k9s
+// doing exactly this).
+//
+// When the plugin is what failed, the error says so, in the plugin's own
+// words where it had any: that is a different problem from the API server
+// not answering, with a different fix.
+func (c *Client) probe(disco discovery.DiscoveryInterface) {
+	plugin := c.RestConfig.ExecProvider
+	started := time.Now()
+	v, err := disco.ServerVersion()
+	if err != nil && plugin != nil && requestTimedOut(err) {
+		v, err = disco.ServerVersion()
+	}
+	switch {
+	case err == nil:
 		c.Version = v.GitVersion
-	} else {
+	case plugin != nil && credentialPluginFailed(err):
+		c.versionErr = &CredentialPluginError{
+			Plugin: filepath.Base(plugin.Command),
+			Said:   tap.said(started),
+			Err:    err,
+		}
+	default:
 		c.versionErr = err
 	}
-	return c, nil
 }
 
 // Reachable reports whether there is actually a cluster behind this
