@@ -66,12 +66,19 @@ func (m *Model) loadErrorLines(inner int, err error) []string {
 		return lipgloss.NewStyle().Background(th.Bg).Foreground(c)
 	}
 	label := "unable to load " + strings.ToLower(m.curKind().Name)
+	hint := "Check RBAC and the selected namespace; K10s will retry automatically."
+	// A credential plugin failing is not an RBAC problem, and patience will
+	// not help: the plugin needs the terminal, and /login gives it that.
+	if p := credentialPlugin(err); p != "" {
+		label = p + " credentials failed for " + strings.ToLower(m.curKind().Name)
+		hint = "/login signs in again with " + p + " from here — it asks on this terminal, then k10s reconnects."
+	}
 	lines := []string{"", s(th.Err).Bold(true).Render("   ✗ " + label), ""}
 	for _, line := range wrapLine(err.Error(), maxi(8, inner-6)) {
 		lines = append(lines, s(th.Fg).Render("   "+line))
 	}
 	lines = append(lines, "")
-	for _, line := range wrapLine("Check RBAC and the selected namespace; K10s will retry automatically.", maxi(8, inner-6)) {
+	for _, line := range wrapLine(hint, maxi(8, inner-6)) {
 		lines = append(lines, s(th.Subtle).Render("   "+line))
 	}
 	return lines

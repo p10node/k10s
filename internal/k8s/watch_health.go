@@ -31,6 +31,20 @@ type watchHealth struct {
 	mu      sync.Mutex
 	err     error
 	pending *time.Timer
+	// plugin names the context's credential plugin, "" if none: a failure
+	// of the plugin's is reported as such (see fail).
+	plugin string
+}
+
+// fail records a LIST/WATCH failure. When the credential plugin is what
+// failed the error says so, in the plugin's own words where it had any:
+// "log in again" is a different instruction from "check RBAC", and the UI
+// can only give it if it can tell the two apart.
+func (h *watchHealth) fail(err error, since time.Time) {
+	if h.plugin != "" && credentialPluginFailed(err) {
+		err = &CredentialPluginError{Plugin: h.plugin, Said: tap.said(since), Err: err}
+	}
+	h.set(err)
 }
 
 // A closed watch is routine (the server expires them every few minutes) and
@@ -73,16 +87,18 @@ func (h *watchHealth) degradeAfter(d time.Duration, err error) {
 func healthyInformer[L runtime.Object](obj runtime.Object, list func(context.Context, metav1.ListOptions) (L, error), open func(context.Context, metav1.ListOptions) (watch.Interface, error), h *watchHealth) cache.SharedIndexInformer {
 	lw := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			started := time.Now()
 			result, err := list(ctx, o)
 			if err != nil {
-				h.set(err)
+				h.fail(err, started)
 			}
 			return result, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			started := time.Now()
 			w, err := open(ctx, o)
 			if err != nil {
-				h.set(err)
+				h.fail(err, started)
 				return nil, err
 			}
 			h.set(nil) // successful watch establishment after LIST/reconnect is recovery
@@ -147,7 +163,7 @@ func (w *healthWatch) run(ctx context.Context, h *watchHealth) {
 
 // Pre-register the instrumented informer so generated typed listers share it.
 func (s *Store) registerHealth(factory informers.SharedInformerFactory, key informerKey) {
-	h := &watchHealth{}
+	h := &watchHealth{plugin: s.credentialPlugin()}
 	s.health[key] = h
 	ns := key.namespace
 	switch key.kind {

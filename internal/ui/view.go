@@ -143,7 +143,16 @@ func (m *Model) viewHeader(l layout) Block {
 	if m.readOnly {
 		roTag = s(th.Warn).Bold(true).Render(" READ-ONLY")
 	}
-	line0 := brand + sep + s(ctxCol).Render(ctxTxt) + demoTag + roTag +
+	// Lapsed credentials are on every frame too: the rows below may be
+	// minutes old and nothing else on screen says so once a toast has
+	// gone. The kind on screen is what is asked, since that is what the
+	// rows are.
+	authTag := ""
+	if p := credentialPlugin(m.kindLoadError()); p != "" {
+		authTag = s(th.Err).Bold(true).Render(" AUTH") +
+			s(th.Subtle).Render(" "+p+" credentials failed · /login")
+	}
+	line0 := brand + sep + s(ctxCol).Render(ctxTxt) + demoTag + roTag + authTag +
 		sep + s(th.Subtle).Render("ver ") + s(th.Fg).Render(ci.Version) +
 		sep + s(th.Subtle).Render("nodes ") + s(nodeCol).Render(nodeTxt)
 
@@ -844,14 +853,18 @@ func (m *Model) viewActions(w, h int) Block {
 	// in this pane would be a button that only produces an error. The pane
 	// says what is missing instead.
 	if m.offline {
-		return Panel(th, PanelOpts{Title: "Actions", Focused: false, W: w, H: h}, []string{
+		rows := []string{
 			s(th.Subtle).Render(" " + trunc("no cluster", inner-1)),
 			s(th.Border).Render(strings.Repeat("╌", inner)),
 			s(th.Subtle).Render(" " + trunc("nothing to act on", inner-1)),
 			"",
 			s(th.Accent2).Render(" r") + s(th.Subtle).Render(trunc("  retry", inner-3)),
-			s(th.Accent2).Render(" /setup") + s(th.Subtle).Render(trunc("  guide", inner-8)),
-		})
+		}
+		if lg := m.loginFor(m.connName); lg != nil {
+			rows = append(rows, s(th.Accent2).Render(" /login")+s(th.Subtle).Render(trunc("  "+lg.Plugin, inner-8)))
+		}
+		rows = append(rows, s(th.Accent2).Render(" /setup")+s(th.Subtle).Render(trunc("  guide", inner-8)))
+		return Panel(th, PanelOpts{Title: "Actions", Focused: false, W: w, H: h}, rows)
 	}
 
 	lines := []string{

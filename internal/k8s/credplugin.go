@@ -3,9 +3,13 @@ package k8s
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +17,8 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/p10node/k10s/internal/domain"
 )
 
 // Credential plugins and the terminal.
@@ -206,6 +212,112 @@ func (e *CredentialPluginError) Error() string {
 }
 
 func (e *CredentialPluginError) Unwrap() error { return e.Err }
+
+// CredentialPlugin names the plugin, for callers that know this error only
+// through an interface (the UI, which does not import this package).
+func (e *CredentialPluginError) CredentialPlugin() string { return e.Plugin }
+
+// credentialPlugin names this client's plugin, "" when the context signs in
+// some other way.
+func (s *Store) credentialPlugin() string {
+	if s.c == nil || s.c.RestConfig == nil || s.c.RestConfig.ExecProvider == nil {
+		return ""
+	}
+	return filepath.Base(s.c.RestConfig.ExecProvider.Command)
+}
+
+// LoginCommand is the way to sign in again with a kubeconfig context's
+// credential plugin: the plugin's own command, ready to be handed the
+// terminal (tea.ExecProcess). nil when the context has no plugin.
+//
+// Running the plugin itself, rather than some login command of the tool's
+// (`tsh login`, `aws sso login`), is what makes this work for every plugin:
+// the exec protocol is the one contract they all honour, and with a
+// terminal each does its own relogin, MFA, or device-code dance and caches
+// the result where its next non-interactive run will find it.
+func LoginCommand(path, context string) *domain.Login {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if path != "" {
+		rules.ExplicitPath = path
+	}
+	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	if err != nil {
+		return nil
+	}
+	return loginCommand(raw, context)
+}
+
+func loginCommand(raw clientcmdapi.Config, context string) *domain.Login {
+	if context == "" {
+		context = raw.CurrentContext
+	}
+	ctx := raw.Contexts[context]
+	if ctx == nil {
+		return nil
+	}
+	auth := raw.AuthInfos[ctx.AuthInfo]
+	if auth == nil || auth.Exec == nil {
+		return nil
+	}
+	ep := auth.Exec
+
+	cmd := exec.Command(ep.Command, ep.Args...)
+	cmd.Env = os.Environ()
+	for _, kv := range ep.Env {
+		cmd.Env = append(cmd.Env, kv.Name+"="+kv.Value)
+	}
+	cmd.Env = append(cmd.Env, "KUBERNETES_EXEC_INFO="+execInfo(ep, raw.Clusters[ctx.Cluster]))
+	// What the plugin prints to stdout is the credential itself — for tsh a
+	// certificate and its private key — and belongs to client-go, never on
+	// a screen. Prompts go to stderr, which the terminal keeps.
+	cmd.Stdout = io.Discard
+
+	return &domain.Login{
+		Plugin: filepath.Base(ep.Command),
+		Cmd:    cmd,
+		Alt:    tshAlt(filepath.Base(ep.Command), ep.Args),
+	}
+}
+
+// execInfo is the KUBERNETES_EXEC_INFO client-go would set: the request as
+// an ExecCredential, saying the plugin has the terminal, and the cluster
+// when the plugin asked to be told about it.
+func execInfo(ep *clientcmdapi.ExecConfig, cluster *clientcmdapi.Cluster) string {
+	spec := map[string]any{"interactive": true}
+	if ep.ProvideClusterInfo && cluster != nil {
+		c := map[string]any{"server": cluster.Server}
+		if len(cluster.CertificateAuthorityData) > 0 {
+			c["certificate-authority-data"] = base64.StdEncoding.EncodeToString(cluster.CertificateAuthorityData)
+		}
+		spec["cluster"] = c
+	}
+	apiVersion := ep.APIVersion
+	if apiVersion == "" {
+		apiVersion = "client.authentication.k8s.io/v1beta1"
+	}
+	b, _ := json.Marshal(map[string]any{"apiVersion": apiVersion, "kind": "ExecCredential", "spec": spec})
+	return string(b)
+}
+
+// tshAlt is Teleport's other way in. Two setups do not fit the exec plugin
+// at all and tsh says so: per-session MFA, whose certificates last about a
+// minute, and a proxy behind an L7 load balancer, which refuses direct
+// Kubernetes clients. `tsh proxy kube` holds the session in its own
+// terminal instead, and the kube cluster's name is in the plugin's args.
+func tshAlt(plugin string, args []string) string {
+	if plugin != "tsh" {
+		return ""
+	}
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--kube-cluster="); ok && v != "" {
+			return "tsh proxy kube " + v + " --exec"
+		}
+		if a == "--kube-cluster" && i+1 < len(args) {
+			return "tsh proxy kube " + args[i+1] + " --exec"
+		}
+	}
+	return ""
+}
 
 // credentialPluginFailed reports whether err is the plugin failing rather
 // than the request it was fetching credentials for. client-go formats the

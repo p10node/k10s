@@ -125,6 +125,7 @@ cluster you are on without you saying so.
 |---|---|
 | `r` | retry the connection from the No cluster panel |
 | `:ctx` | pick another context from kubeconfig |
+| `/login` | sign in again with the context's credential plugin, then reconnect |
 | `/setup` | this guide, in a text view |
 | `/demo` | the built-in sample cluster — fake data, clearly labelled |
 | `k10s demo` | the same thing, opened straight from a shell |
@@ -178,10 +179,17 @@ k10s does two things instead:
   credential plugin tsh: Having problems with relogin, please use 'tsh login/tsh kube login' manually
   ```
 
-The fix is in another shell: `tsh login` or `tsh kube login <cluster>`,
-`aws sso login`, `az login` — whatever the message names — then `r`.
-Credentials the plugin caches (tsh keeps certificates under `~/.tsh`) are
-picked up on the retry.
+**`/login`** signs in again without leaving k10s. It hands the terminal to
+the plugin — the same way `$EDITOR` gets it — so the plugin can do its own
+relogin, MFA tap or device code, and caches the result where its next
+non-interactive run will find it (tsh keeps certificates under `~/.tsh`).
+When the plugin exits cleanly k10s reconnects; when it does not, what it
+said is on the terminal, and the fix is whatever it named. The panel offers
+`/login` whenever the context signs in through a plugin, and the header
+says **AUTH** for as long as the kind on screen is failing on credentials.
+
+Or log in in another shell — `tsh login` or `tsh kube login <cluster>`,
+`aws sso login`, `az login` — then `r`.
 
 A plugin that takes a while (minting a certificate, calling STS) does not
 cost you the connection: its run time is spent inside the first request's

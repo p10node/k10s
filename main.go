@@ -132,6 +132,7 @@ func main() {
 		Connect:          newSource,
 		ReadOnly:         readOnly,
 		CredentialPlugin: func(ctx string) string { return k8s.CredentialPlugin("", ctx) },
+		Login:            func(ctx string) *domain.Login { return k8s.LoginCommand("", ctx) },
 		TerminalStderr:   terminal,
 	})
 

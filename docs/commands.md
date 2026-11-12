@@ -51,6 +51,7 @@ enter runs it. `tab` always completes rather than runs.
 | `/version`  |          | which build is running, and what the last check found                                         |
 | `/demo`     |          | switch to k10s's built-in demo cluster (`k10s-demo`) — sample data; `:ctx` leaves it          |
 | `/setup`    |          | how to install kubectl and get a `~/.kube/config` — links, readable with no cluster connected |
+| `/login`    |          | sign in again with the context's credential plugin (tsh, aws, kubelogin) — it gets the terminal, then k10s reconnects |
 | `/help`     |          | keybindings + commands text view                                                              |
 | `:search`   | `<term>` | filter the resource list (left pane, by kind)                                                 |
 | `:filter`   | `<term>` | filter rows of the table currently open (main pane)                                           |

@@ -47,6 +47,10 @@ type Startup struct {
 	// minting a certificate is the slow part of connecting and the part the
 	// user can do something about, so the connecting toast names it.
 	CredentialPlugin func(context string) string
+	// Login is how to sign in again with a context's credential plugin: the
+	// plugin's own command, which /login hands the terminal to. nil for a
+	// context that has no plugin. See login.go.
+	Login func(context string) *domain.Login
 	// TerminalStderr is where a process that takes the terminal over (the
 	// editor, a foreground plugin) writes its errors. While k10s runs,
 	// os.Stderr is a pipe that collects what credential plugins say (see
@@ -61,6 +65,7 @@ func NewStartup(s Startup) *Model {
 	m.connect = s.Connect
 	m.readOnly = s.ReadOnly
 	m.credPlugin = s.CredentialPlugin
+	m.login = s.Login
 	m.termStderr = s.TerminalStderr
 	// A demo context is not something kubeconfig can hand back, so it has to
 	// be asked for by name; anything else stays "" — kubeconfig's

@@ -298,7 +298,7 @@ screen. `enter` runs the highlighted suggestion immediately - no second trip
 through the prompt.
 
 ```
-/theme  /settings  /mouse  /update  /version  /demo  /setup  /help    k10s itself
+/theme  /settings  /mouse  /update  /version  /demo  /setup  /login  /help    k10s itself
 
 :po  :deploy  :rs  :sts  :ds  :job  :cj  :hpa      workloads
 :svc  :ep  :ing  :netpol                           network

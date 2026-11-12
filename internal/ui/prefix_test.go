@@ -711,9 +711,12 @@ func TestNamespaceAndContextAreColonCommands(t *testing.T) {
 	// count: it is a page about getting connected, readable with no cluster
 	// at all, which is exactly when it is needed. /demo qualifies on the
 	// first: the demo cluster is k10s's own, not something a cluster has.
+	// /login is /setup's sibling: it is about getting connected — the
+	// kubeconfig's credential plugin, which is this machine's, not the
+	// cluster's — and it is most needed when there is no cluster on screen.
 	for _, c := range clusterCommands {
 		switch c.Name {
-		case "/theme", "/settings", "/mouse", "/update", "/version", "/demo", "/setup", "/help":
+		case "/theme", "/settings", "/mouse", "/update", "/version", "/demo", "/setup", "/login", "/help":
 		default:
 			t.Errorf("%q is under / but is not one of k10s's own settings", c.Name)
 		}

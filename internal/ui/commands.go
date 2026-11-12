@@ -68,6 +68,7 @@ var clusterCommands = []SlashCommand{
 	{Name: "/version", Desc: "which build is running, and what the last check found"},
 	{Name: "/demo", Desc: "open k10s's built-in demo cluster — sample data, :ctx leaves it"},
 	{Name: "/setup", Desc: "no cluster? how to install kubectl and write ~/.kube/config"},
+	{Name: "/login", Desc: "sign in again with the context's credential plugin (tsh, aws, kubelogin)"},
 	{Name: "/help", Desc: "keybindings and commands"},
 }
 
@@ -359,6 +360,11 @@ func Help() string {
                         ~/.kube/config, with links to the official docs.
                         Readable with nothing connected — which is when it
                         is needed.
+    /login              sign in again with the context's credential plugin
+                        (tsh, aws, kubelogin). The plugin cannot prompt
+                        while k10s holds the terminal, so this hands the
+                        terminal to it — relogin, MFA tap, device code —
+                        and reconnects when it is done.
     /help               this screen
 
     :po :deploy …       go to a resource view, k9s-style. Every kind
@@ -401,6 +407,8 @@ func Help() string {
     panel says "No cluster" instead of inventing rows.
     r                   retry the connection
     :ctx                pick another context from kubeconfig
+    /login              sign in again, when the context uses a credential
+                        plugin and that is what failed
     /setup              install/kubeconfig links
     /demo               the built-in sample cluster, clearly labelled — the
                         only way to see fake data

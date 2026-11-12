@@ -3,6 +3,7 @@ package k8s
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -249,5 +250,121 @@ func TestCredentialPluginNamesTheContextsPlugin(t *testing.T) {
 		if got := credentialPlugin(raw, ctx); got != want {
 			t.Errorf("credentialPlugin(%q) = %q, want %q", ctx, got, want)
 		}
+	}
+}
+
+// /login runs the plugin itself, with the terminal, exactly as the
+// kubeconfig configures it — plus the request client-go would have put in
+// its environment, and without its stdout, which is the credential.
+func TestLoginCommandIsThePluginWithTheTerminal(t *testing.T) {
+	raw := clientcmdapi.Config{
+		CurrentContext: "tp",
+		Clusters: map[string]*clientcmdapi.Cluster{
+			"tp": {Server: "https://tp.example.com:443", CertificateAuthorityData: []byte("ca")},
+		},
+		Contexts: map[string]*clientcmdapi.Context{
+			"tp":   {AuthInfo: "tp", Cluster: "tp"},
+			"eks":  {AuthInfo: "eks", Cluster: "tp"},
+			"kind": {AuthInfo: "kind"},
+		},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{
+			"tp": {Exec: &clientcmdapi.ExecConfig{
+				APIVersion: "client.authentication.k8s.io/v1beta1",
+				Command:    "/usr/local/bin/tsh",
+				Args:       []string{"kube", "credentials", "--kube-cluster=prod", "--teleport-cluster=tp", "--proxy=tp.example.com:443"},
+				Env:        []clientcmdapi.ExecEnvVar{{Name: "TELEPORT_HOME", Value: "/x"}},
+			}},
+			"eks": {Exec: &clientcmdapi.ExecConfig{
+				APIVersion:         "client.authentication.k8s.io/v1",
+				Command:            "aws",
+				Args:               []string{"eks", "get-token"},
+				ProvideClusterInfo: true,
+			}},
+			"kind": {Token: "t"},
+		},
+	}
+
+	lg := loginCommand(raw, "")
+	if lg == nil {
+		t.Fatal("loginCommand = nil for the current context, which has a plugin")
+	}
+	if lg.Plugin != "tsh" || lg.Cmd.Path != "/usr/local/bin/tsh" {
+		t.Errorf("Plugin = %q, Path = %q, want tsh at its kubeconfig path", lg.Plugin, lg.Cmd.Path)
+	}
+	if got := strings.Join(lg.Cmd.Args[1:], " "); got != "kube credentials --kube-cluster=prod --teleport-cluster=tp --proxy=tp.example.com:443" {
+		t.Errorf("args = %q, want the kubeconfig's", got)
+	}
+	env := strings.Join(lg.Cmd.Env, "\n")
+	if !strings.Contains(env, "\nTELEPORT_HOME=/x\n") && !strings.HasSuffix(env, "\nTELEPORT_HOME=/x") && !strings.Contains(env, "TELEPORT_HOME=/x\n") {
+		t.Errorf("env lacks the kubeconfig's TELEPORT_HOME: %q", env)
+	}
+	if !strings.Contains(env, `KUBERNETES_EXEC_INFO={"apiVersion":"client.authentication.k8s.io/v1beta1","kind":"ExecCredential","spec":{"interactive":true}}`) {
+		t.Errorf("env lacks the ExecCredential request: %q", env)
+	}
+	if lg.Cmd.Stdout != io.Discard {
+		t.Errorf("Stdout = %v, want io.Discard: the credential must not reach the screen", lg.Cmd.Stdout)
+	}
+	if lg.Alt != "tsh proxy kube prod --exec" {
+		t.Errorf("Alt = %q, want Teleport's local proxy for the kube cluster in the args", lg.Alt)
+	}
+
+	eks := loginCommand(raw, "eks")
+	if eks == nil || eks.Plugin != "aws" || eks.Alt != "" {
+		t.Fatalf("eks login = %+v, want the aws plugin with no alternative", eks)
+	}
+	env = strings.Join(eks.Cmd.Env, "\n")
+	for _, want := range []string{`"apiVersion":"client.authentication.k8s.io/v1"`, `"server":"https://tp.example.com:443"`, `"certificate-authority-data":"Y2E="`} {
+		if !strings.Contains(env, want) {
+			t.Errorf("provideClusterInfo: env lacks %s: %q", want, env)
+		}
+	}
+
+	for _, ctx := range []string{"kind", "absent"} {
+		if lg := loginCommand(raw, ctx); lg != nil {
+			t.Errorf("loginCommand(%q) = %+v, want nil: no plugin to log in with", ctx, lg)
+		}
+	}
+}
+
+func TestTshAltReadsTheKubeClusterEitherWay(t *testing.T) {
+	cases := []struct {
+		plugin string
+		args   []string
+		want   string
+	}{
+		{"tsh", []string{"kube", "credentials", "--kube-cluster=prod"}, "tsh proxy kube prod --exec"},
+		{"tsh", []string{"kube", "credentials", "--kube-cluster", "prod"}, "tsh proxy kube prod --exec"},
+		{"tsh", []string{"kube", "credentials"}, ""},
+		{"aws", []string{"--kube-cluster=prod"}, ""},
+	}
+	for _, c := range cases {
+		if got := tshAlt(c.plugin, c.args); got != c.want {
+			t.Errorf("tshAlt(%q, %q) = %q, want %q", c.plugin, c.args, got, c.want)
+		}
+	}
+}
+
+// A LIST or WATCH that failed because the plugin did is reported as the
+// plugin's failure, so the UI can say "log in again" rather than "check
+// RBAC". Any other failure, and any failure without a plugin, is left as
+// it was.
+func TestWatchFailureNamesTheCredentialPlugin(t *testing.T) {
+	pluginErr := errors.New(`Get "https://x/api/v1/pods": getting credentials: exec: executable tsh failed with exit code 1`)
+
+	h := &watchHealth{plugin: "tsh"}
+	h.fail(pluginErr, time.Now())
+	var pe *CredentialPluginError
+	if err := h.get(); !errors.As(err, &pe) || pe.Plugin != "tsh" {
+		t.Errorf("health = %v, want a CredentialPluginError naming tsh", err)
+	}
+	h.fail(errors.New("forbidden"), time.Now())
+	if err := h.get(); err == nil || err.Error() != "forbidden" {
+		t.Errorf("health after an RBAC failure = %v, want it unchanged", err)
+	}
+
+	none := &watchHealth{}
+	none.fail(pluginErr, time.Now())
+	if err := none.get(); errors.As(err, &pe) {
+		t.Errorf("health with no plugin = %v, want client-go's error as it was", err)
 	}
 }

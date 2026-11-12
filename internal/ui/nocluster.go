@@ -112,6 +112,20 @@ func (m *Model) noClusterLines(inner int) []string {
 		}
 		out = append(out, "")
 	}
+	// The fix next to the problem: a context that signs in through a
+	// credential plugin can sign in again from here, whatever the reason
+	// above says — logging in is never the wrong first thing to try with
+	// one of these, and it is the only thing to try when the plugin is
+	// what failed.
+	if lg := m.loginFor(m.connName); lg != nil {
+		out = append(out,
+			s(th.Bg).Render(pad)+s(th.Accent2).Render("/login")+
+				s(th.Subtle).Render(trunc(" sign in again with "+lg.Plugin+" — it asks on this terminal, then k10s reconnects", maxi(0, inner-len(pad)-6))))
+		if lg.Alt != "" {
+			out = append(out, line(th.Subtle, "or, in a shell:  "+lg.Alt+"   then run k10s there"))
+		}
+		out = append(out, "")
+	}
 	out = append(out,
 		line(th.Subtle, "k10s reads the same kubeconfig kubectl does — $KUBECONFIG,"),
 		line(th.Subtle, "else ~/.kube/config. Nothing there answered, so there is"),
@@ -222,7 +236,9 @@ whatever that context can reach. No kubeconfig, no cluster, nothing to show.
       credential plugin tsh: Having problems with relogin, please use
       'tsh login/tsh kube login' manually
 
-    Log in with that tool in another shell (tsh login, aws sso login,
+    /login hands the terminal to the plugin so it can ask — relogin,
+    MFA tap, device code — and k10s reconnects when it is done. Or log
+    in with the tool in another shell (tsh login, aws sso login,
     az login…), then press r. Teleport with per-session MFA, or behind
     an L7 load balancer, wants its local proxy instead:
       tsh proxy kube <cluster> --exec      then run k10s in that shell

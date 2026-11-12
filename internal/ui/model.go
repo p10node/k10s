@@ -227,9 +227,10 @@ type Model struct {
 	connecting bool
 	connGen    int
 	connName   string
-	// credPlugin and termStderr are Startup.CredentialPlugin and
-	// Startup.TerminalStderr; see connect.go.
+	// credPlugin, login and termStderr are Startup.CredentialPlugin,
+	// Startup.Login and Startup.TerminalStderr; see connect.go.
 	credPlugin func(context string) string
+	login      func(context string) *domain.Login
 	termStderr io.Writer
 
 	// readOnly is --readonly. Actions that change the cluster or open a
@@ -1156,6 +1157,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(m.toTerminal(c), func(err error) tea.Msg {
 			return editExitMsg{source: msg.source, original: msg.original, session: msg.session, kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 		})
+
+	case loginExitMsg:
+		return m, m.handleLoginExit(msg)
 
 	case editExitMsg:
 		// Bubble Tea releases the terminal while $EDITOR is running. Its
@@ -2527,6 +2531,9 @@ func (m *Model) runSlash(cmd string) tea.Cmd {
 		return m.switchContextCmd(domain.DemoContext)
 	case "/setup":
 		m.showText("setup", SetupGuide())
+	case "/login":
+		m.closePrompt()
+		return m.loginCmd()
 	case "/help":
 		m.showText("help", Help())
 	default:

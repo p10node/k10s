@@ -7,12 +7,24 @@ package domain
 import (
 	"errors"
 	"io"
+	"os/exec"
 	"slices"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Login is how to sign in again with a context's credential plugin by hand:
+// the plugin's own command, to be run with the terminal — which is what
+// kubectl would have let it do, and what the TUI cannot while it is up.
+// Alt is a second way in for plugins that have one (Teleport's local
+// proxy), or "".
+type Login struct {
+	Plugin string // "tsh", "aws", "kubelogin"
+	Cmd    *exec.Cmd
+	Alt    string
+}
 
 // AllNamespaces is the :ns sentinel that shows every namespace at once.
 const AllNamespaces = "all"
