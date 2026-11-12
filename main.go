@@ -97,6 +97,12 @@ func main() {
 	}
 
 	k8s.SilenceLogging()
+	// Credential plugins (tsh, aws, kubelogin) write to whatever os.Stderr
+	// is when the first client is built. From here on that is a pipe k10s
+	// reads, so a plugin's complaint reaches the No cluster panel instead of
+	// the raw terminal under the TUI; the terminal itself goes only to
+	// processes that are meant to have it.
+	terminal := k8s.CaptureStderr()
 	// Before the first connection: only clients built after this carry the
 	// guard.
 	if readOnly {
@@ -120,16 +126,21 @@ func main() {
 	}
 
 	m := ui.NewStartup(ui.Startup{
-		Kinds:    k8s.Kinds(),
-		Contexts: ctxNames,
-		Context:  curCtx,
-		Connect:  newSource,
-		ReadOnly: readOnly,
+		Kinds:            k8s.Kinds(),
+		Contexts:         ctxNames,
+		Context:          curCtx,
+		Connect:          newSource,
+		ReadOnly:         readOnly,
+		CredentialPlugin: func(ctx string) string { return k8s.CredentialPlugin("", ctx) },
+		TerminalStderr:   terminal,
 	})
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "k10s:", err)
+	_, runErr := p.Run()
+	// The TUI is gone; whatever is said from here belongs on the screen.
+	k8s.ReleaseStderr()
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "k10s:", runErr)
 		os.Exit(1)
 	}
 

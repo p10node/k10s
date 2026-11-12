@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
+	"github.com/p10node/k10s/internal/k8s"
 	"github.com/p10node/k10s/internal/update"
 )
 
@@ -92,5 +93,19 @@ func TestSelfUpdateStepsAsideForAPackageManager(t *testing.T) {
 	}
 	if want := "installed by Homebrew, which updates it: run brew upgrade k10s"; err.Error() != want {
 		t.Errorf("selfUpdate error = %q, want %q", err, want)
+	}
+}
+
+// A credential plugin's own words survive the trim: they are the actionable
+// part, and nothing in them is advice aimed at another tool.
+func TestNoClusterReasonKeepsACredentialPluginsWords(t *testing.T) {
+	err := &k8s.CredentialPluginError{
+		Plugin: "tsh",
+		Said:   "Having problems with relogin, please use 'tsh login/tsh kube login' manually",
+		Err:    errors.New("getting credentials: exec: executable tsh failed with exit code 1"),
+	}
+	want := "credential plugin tsh: Having problems with relogin, please use 'tsh login/tsh kube login' manually"
+	if got := noClusterReason(err); got != want {
+		t.Errorf("noClusterReason = %q\n              want %q", got, want)
 	}
 }
