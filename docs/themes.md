@@ -23,7 +23,7 @@ and `esc` restores whatever was active before you opened it.
 
 k10s loads custom `.yaml` and `.yml` files at startup and appends every valid
 theme to the normal theme picker and `T` / `ctrl+t` cycle. The default folder
-is `~/.k10s/themes` (the `themes` folder beside `config.yaml`). If
+is `~/.config/k10s/themes` (the `themes` folder beside `config.yaml`, so it follows `$XDG_CONFIG_HOME`). If
 `K10S_CONFIG` points elsewhere, the folder follows it; `K10S_THEME_DIR`
 overrides the theme folder directly.
 
@@ -32,27 +32,27 @@ overrides the theme folder directly.
 From a cloned repository on macOS or Linux:
 
 ```bash
-mkdir -p ~/.k10s/themes
-install -m 0644 examples/themes/rose-pine.yaml ~/.k10s/themes/rose-pine.yaml
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/k10s/themes"
+install -m 0644 examples/themes/rose-pine.yaml "${XDG_CONFIG_HOME:-$HOME/.config}/k10s/themes/rose-pine.yaml"
 k10s
 ```
 
 Without cloning:
 
 ```bash
-mkdir -p ~/.k10s/themes
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/k10s/themes"
 curl -fsSL https://raw.githubusercontent.com/p10node/k10s/main/examples/themes/rose-pine.yaml \
-  -o ~/.k10s/themes/rose-pine.yaml
+  -o "${XDG_CONFIG_HOME:-$HOME/.config}/k10s/themes/rose-pine.yaml"
 k10s
 ```
 
 On Windows PowerShell:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME/.k10s/themes" | Out-Null
+New-Item -ItemType Directory -Force "$HOME/.config/k10s/themes" | Out-Null
 Invoke-WebRequest `
   https://raw.githubusercontent.com/p10node/k10s/main/examples/themes/rose-pine.yaml `
-  -OutFile "$HOME/.k10s/themes/rose-pine.yaml"
+  -OutFile "$HOME/.config/k10s/themes/rose-pine.yaml"
 k10s
 ```
 

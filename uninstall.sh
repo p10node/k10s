@@ -5,13 +5,13 @@
 #
 # The mirror of install.sh: same shells, same flags where they overlap, same
 # TTY-aware sudo rule. It only ever deletes a file named k10s (or the
-# ~/.k10s directory with --purge), and it prints every path before touching
+# config directory with --purge), and it prints every path before touching
 # it, so a --dry-run first costs nothing.
 #
 # Knobs (env or flag):
 #   K10S_INSTALL_DIR=~/bin     --dir ~/bin    look only there
 #   K10S_NO_SUDO=1             --no-sudo      never escalate
-#   K10S_PURGE=1               --purge        also delete ~/.k10s
+#   K10S_PURGE=1               --purge        also delete the config directory
 set -eu
 
 BIN="k10s"
@@ -46,8 +46,8 @@ ${B}k10s uninstaller${R}
   curl -fsSL https://p10node.com/k10s/uninstall.sh | sh -s -- --purge
 
 Options
-  --purge          also delete ~/.k10s (config, theme choice)
-  --keep-config    keep ~/.k10s and say nothing about it
+  --purge          also delete the config directory (~/.config/k10s; config, theme choice)
+  --keep-config    keep the config directory and say nothing about it
   --dir <path>     only look in <path>, instead of PATH + the usual places
   --dry-run        print what would be removed, remove nothing
   -y, --yes        no confirmation prompt
@@ -116,14 +116,24 @@ else
 fi
 
 # What internal/config calls the config path: $K10S_CONFIG wins, otherwise
-# ~/.k10s/config.yaml. With $K10S_CONFIG set, only that file is ours to
-# delete — the directory around it belongs to whoever chose the path.
+# $XDG_CONFIG_HOME/k10s (~/.config/k10s when unset or not absolute), else
+# the pre-XDG ~/.k10s while it is the only one present. With $K10S_CONFIG set,
+# only that file is ours to delete — the directory around it belongs to
+# whoever chose the path.
 CONFIG_DIR=""
 CONFIG_FILE=""
 if [ -n "${K10S_CONFIG:-}" ]; then
     [ -f "$K10S_CONFIG" ] && CONFIG_FILE="$K10S_CONFIG"
-elif [ -d "$HOME/.k10s" ]; then
-    CONFIG_DIR="$HOME/.k10s"
+else
+    case "${XDG_CONFIG_HOME:-}" in
+        /*) xdg_base="$XDG_CONFIG_HOME" ;;
+        *)  xdg_base="$HOME/.config" ;;
+    esac
+    if [ -d "$xdg_base/k10s" ]; then
+        CONFIG_DIR="$xdg_base/k10s"
+    elif [ -d "$HOME/.k10s" ]; then
+        CONFIG_DIR="$HOME/.k10s"
+    fi
 fi
 CONFIG_TARGET="${CONFIG_DIR:-$CONFIG_FILE}"
 

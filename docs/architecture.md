@@ -12,7 +12,7 @@ internal/mock/          offline demo backend, same interface, no network
                         and the tests — never as a fallback)
 internal/ai/            OpenAI-compatible / Anthropic HTTP calls
 internal/theme/         Theme struct + 7 palettes
-internal/config/        ~/.k10s/config.yaml load/save
+internal/config/        config.yaml load/save (XDG config dir)
 internal/version/       the -ldflags build stamp (version, commit, date)
 internal/update/        self-update: GitHub releases, checksums, atomic swap
 internal/ui/

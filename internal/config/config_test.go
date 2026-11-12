@@ -186,3 +186,56 @@ func TestCollapsedNoneIsDistinctFromUnset(t *testing.T) {
 		t.Error("a config without the key should read as unset")
 	}
 }
+
+func TestPathFollowsXDG(t *testing.T) {
+	home := t.TempDir()
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	t.Setenv("HOME", home)
+	t.Setenv("K10S_CONFIG", "")
+
+	t.Run("XDG_CONFIG_HOME wins when absolute", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		if got, want := Path(), filepath.Join(xdg, "k10s", "config.yaml"); got != want {
+			t.Errorf("Path() = %q, want %q", got, want)
+		}
+	})
+
+	for _, bad := range []string{"", "relative/dir"} {
+		t.Run("falls back to ~/.config for XDG_CONFIG_HOME="+bad, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", bad)
+			if got, want := Path(), filepath.Join(home, ".config", "k10s", "config.yaml"); got != want {
+				t.Errorf("Path() = %q, want %q", got, want)
+			}
+		})
+	}
+
+	t.Run("K10S_CONFIG beats everything", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		t.Setenv("K10S_CONFIG", "/tmp/x.yaml")
+		if got := Path(); got != "/tmp/x.yaml" {
+			t.Errorf("Path() = %q", got)
+		}
+	})
+}
+
+func TestPathKeepsLegacyDirUntilXDGDirExists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("K10S_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	legacy := filepath.Join(home, ".k10s")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := Path(), filepath.Join(legacy, "config.yaml"); got != want {
+		t.Errorf("legacy dir only: Path() = %q, want %q", got, want)
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".config", "k10s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := Path(), filepath.Join(home, ".config", "k10s", "config.yaml"); got != want {
+		t.Errorf("both dirs: Path() = %q, want %q", got, want)
+	}
+}

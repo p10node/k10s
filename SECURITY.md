@@ -71,11 +71,11 @@ install anything else, or to replace any other file, is a vulnerability. The
 checksum shows that the archive is the one the release lists, not who
 published the release: anyone who can publish a release in that repository
 can ship a binary that passes, which is what the attestations below are
-for. `update.disabled: true` in `~/.k10s/config.yaml` turns the daily check
+for. `update.disabled: true` in `~/.config/k10s/config.yaml` turns the daily check
 off. See [docs/update.md](docs/update.md).
 
 **Plugins and shell commands run as you.** A plugin file is a program you
-chose to run, so anyone who can write to `~/.k10s/plugins.yaml` can already
+chose to run, so anyone who can write to `~/.config/k10s/plugins.yaml` can already
 run commands as you; that is not a vulnerability in k10s. k10s runs the
 plugin's command directly, never through a shell of its own, and fills
 object names, namespaces and column values into its arguments as text. When
@@ -103,7 +103,7 @@ Known limits, documented and not vulnerabilities in themselves:
   when the release's `checksums.txt` cannot be fetched or does not list the
   archive, or on a machine with no `sha256sum`, `shasum` or `openssl`. The
   self-updater refuses instead.
-- `~/.k10s/config.yaml` (mode 0600) can hold the legacy AI API key in plain
+- `~/.config/k10s/config.yaml` (mode 0600) can hold the legacy AI API key in plain
   text. AI is disabled in this build.
 
 ## Checking a release

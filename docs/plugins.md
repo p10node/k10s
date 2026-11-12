@@ -8,8 +8,8 @@ Applicable plugins appear in the Actions pane and can also be clicked.
 
 k10s loads these at startup, in order:
 
-1. `~/.k10s/plugins.yaml`
-2. every `.yaml` or `.yml` file recursively under `~/.k10s/plugins/`
+1. `~/.config/k10s/plugins.yaml` (`$XDG_CONFIG_HOME/k10s/` when set)
+2. every `.yaml` or `.yml` file recursively under `~/.config/k10s/plugins/`
 
 Files in the directory override an earlier plugin with the same name. Use
 `K10S_PLUGINS` and `K10S_PLUGIN_DIR` to override the two locations. When

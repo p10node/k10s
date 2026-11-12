@@ -290,7 +290,7 @@ func Help() string {
     o cordon/uncordon · u drain (nodes only)
     the pane lists only the actions that apply to the selected kind
     D delete (confirm dialog)
-    plugins             ~/.k10s/plugins.yaml shortcuts appear in the same pane;
+    plugins             plugins.yaml shortcuts appear in the same pane;
                         built-in keys win unless override: true
 
   COPY / SELECT

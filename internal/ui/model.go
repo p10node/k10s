@@ -330,7 +330,7 @@ func New(src domain.Source) *Model {
 	return m
 }
 
-// loadConfig applies ~/.k10s/config.yaml (or $K10S_CONFIG) on startup.
+// loadConfig applies config.Path() ($K10S_CONFIG or the XDG config dir) on startup.
 func (m *Model) loadConfig() {
 	c, err := config.Load()
 	m.logLimits = c.Logs
