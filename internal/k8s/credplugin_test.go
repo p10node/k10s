@@ -254,7 +254,7 @@ func TestCredentialPluginNamesTheContextsPlugin(t *testing.T) {
 	}
 }
 
-// What the tap read comes back byte for byte, tabs and blank lines kept: a
+// What the tap read comes back line by line, tabs and blank lines kept: a
 // stack trace without its indentation is hard to read.
 func TestDrainStderrGivesBackWhatWasWritten(t *testing.T) {
 	captureStderrForTest(t)
