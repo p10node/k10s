@@ -233,7 +233,7 @@ type Model struct {
 	termStderr io.Writer
 
 	// readOnly is --readonly. Actions that change the cluster or open a
-	// session into it are hidden and refused, and so are dangerous plugins
+	// session into it are hidden and refused, and so are external plugins
 	// and typed shell commands; see domain.ReadOnlyAllows.
 	readOnly bool
 
