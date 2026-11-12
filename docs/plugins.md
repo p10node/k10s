@@ -86,6 +86,21 @@ args:
   - kubectl get pod "$NAME" -n "$NAMESPACE" -o json | jq .status
 ```
 
+k10s does not paste values into the script a shell runs with `-c`. When the
+command is `sh`, `bash`, `zsh`, `dash` or `ksh`, run directly or through
+`env` or `busybox`, the script reads `$NAME`, `$NAMESPACE` and the other
+variables from the environment, and `$COL-STATUS` becomes
+`${K10S_COL_<hex>}`, so a value is never read as shell syntax. Quote them as
+any shell variable: `"$NAME"`, not `'$NAME'`, which the shell leaves as it is.
+Options such as `-x` or `-o pipefail` may come before or after `-c`, and `--`
+may end them. Arguments after the script, which the shell passes as `$0`,
+`$1` and so on, get the values as text. When k10s cannot tell which argument
+is the script, for an option it does not read such as bash's `-O`, every
+argument reads the values from the environment. `env -S` is not a way to a
+shell: it builds a command line of its own from a string and expands
+`${VAR}` in it, so k10s fills values into that string as text, as it does
+for `python3 -c`.
+
 Foreground commands temporarily leave the alternate screen and inherit the
 terminal, so interactive tools such as `fzf` work. Background commands have no
 attached terminal or visible output.
