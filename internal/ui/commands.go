@@ -343,6 +343,8 @@ func Help() string {
                         into it. The check also runs once a day at startup
                         and only speaks up when there is something newer —
                         turn it off in /settings.
+                        A Homebrew install is Homebrew's to update: /update
+                        says to run brew upgrade k10s instead.
     /update skip        stop mentioning the release the last check found,
                         without turning the check off
     /version            which build this is, where updates come from, and

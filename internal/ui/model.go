@@ -281,6 +281,7 @@ type Model struct {
 	updSkip     string
 	updLast     time.Time
 	updBusy     bool
+	updOwner    *update.Owner // the package manager that installed k10s, if any
 	relaunch    bool
 	sourceOwner *sourceLease
 	viewGen     int
@@ -306,6 +307,7 @@ func New(src domain.Source) *Model {
 		portFwds:  map[string]func(){},
 		cli:       config.DefaultCLI,
 		clis:      append([]string(nil), config.CLIPresets...),
+		updOwner:  update.InstalledBy(),
 		toast:     "connected to " + src.ClusterInfo().Context,
 		cfg: aiConfig{
 			provider: 1,
