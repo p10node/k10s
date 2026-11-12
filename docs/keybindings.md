@@ -194,7 +194,7 @@ level tokens are coloured.
 ## Mouse
 
 Click: resource rows, table rows, every action, `[ zoom ]`/`[ close ]`, the
-`ns …` and `theme …` buttons top-right, the `⇧ 1.4.0` update badge in the
+`ns …` and `theme …` buttons top-right, the `⇧ X.Y.Z` update badge in the
 status bar, prompt row, mode tag, suggestion rows, palette and picker rows,
 modal buttons, provider radios, the update-check toggle.
 

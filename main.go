@@ -85,7 +85,7 @@ func main() {
 			fmt.Println(version.String())
 			return
 		case "update", "--update", "upgrade", "self-update":
-			if err := selfUpdate(); err != nil {
+			if err := selfUpdate(update.InstalledBy()); err != nil {
 				fmt.Fprintln(os.Stderr, "k10s:", err)
 				os.Exit(1)
 			}
@@ -150,7 +150,14 @@ func main() {
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
 // with a progress line instead of a modal.
-func selfUpdate() error {
+//
+// owner is the package manager that installed this binary, if one did. Then
+// nothing is checked or written, and the error names that package manager's
+// upgrade command, so `k10s update` exits non-zero with it.
+func selfUpdate(owner *update.Owner) error {
+	if owner != nil {
+		return &update.ManagedError{Owner: owner}
+	}
 	cfg, _ := config.Load()
 	c := &update.Client{Repo: cfg.Update.Repo}
 
@@ -224,6 +231,7 @@ usage:
                     request that could change the cluster is refused before
                     it leaves the machine. Works with demo too.
   k10s update       install the newest release over this binary
+                    (a Homebrew install says to run brew upgrade k10s)
   k10s --version    print the running build
   k10s --help       this text
 

@@ -13,6 +13,10 @@ k10s --version     same, one line, no TTY needed
 Plus a check that runs at most once a day at startup and only speaks up when
 there is something newer.
 
+A copy that Homebrew installed is Homebrew's to upgrade: `k10s update` and
+`/update` say `brew upgrade k10s` instead. See
+[Package managers](#package-managers).
+
 ## The two halves
 
 `internal/update` is split so the cheap half can run unattended:
@@ -29,7 +33,7 @@ check and the status-bar badge run on.
 
 - Runs at most once every 24 hours (`update.CheckInterval`), tracked as
   `update.last_check` in the config file.
-- Reports a newer release as a status-bar toast plus a clickable `⇧ 1.4.0`
+- Reports a newer release as a status-bar toast plus a clickable `⇧ X.Y.Z`
   badge. It never opens a dialog: nobody launches k10s to be interrupted.
 - Says nothing when there is nothing newer, and **says nothing when it
   fails** — an offline laptop is not an error the user asked about. A manual
@@ -89,6 +93,34 @@ environment (`syscall.Exec` on POSIX — no second process, no lost TTY; a
 child process on Windows, which has no exec). Declining keeps the session
 running on the old build.
 
+## Package managers
+
+A binary that a package manager installed belongs to that package manager,
+which keeps its own record of the version it put where. A self-update
+written over it would leave that record naming a build that is gone, so
+k10s steps aside and names the command that does the job:
+
+| Installed by | Recognised by                                                          | Upgrade with        |
+|--------------|------------------------------------------------------------------------|---------------------|
+| Homebrew     | the binary, symlinks resolved, is in `<prefix>/Cellar/k10s/<version>/` | `brew upgrade k10s` |
+
+- `k10s update` prints `k10s: installed by Homebrew, which updates it: run
+  brew upgrade k10s` and exits 1. It checks nothing and writes nothing.
+- `/update`, and a click on the status-bar badge, show the same line instead
+  of the confirmation dialog. `/update skip` still silences a release.
+- The startup check still runs, and `update.disabled` still turns it off.
+  When it finds a newer release, its notice says `brew upgrade k10s`
+  instead of `/update`.
+- `/version` says who installed the binary.
+
+Recognition compares whole path segments once symlinks are resolved. macOS
+reports the `bin/k10s` link that Homebrew puts on `PATH`, and the link points
+into the keg; Linux reports the keg directly. A directory that merely has
+"Cellar" in its name is not a keg, and the copy `install.sh` puts in
+`/usr/local/bin` or `/opt/homebrew/bin` is a plain file, so `k10s update`
+replaces that one as before. `Apply` makes the same check before it writes
+anything, so no way into the install can write into a keg.
+
 ## Which asset gets picked
 
 Assets are matched by name, not by a fixed convention, because the same
@@ -96,8 +128,8 @@ release may be built by `just release`, by goreleaser, or by hand. Matching
 needs one OS token *and* one architecture token, each delimited:
 
 ```
-k10s_1.4.0_darwin_arm64.tar.gz     ✓
-k10s-v1.4.0-macos-x86_64.tar.gz    ✓  darwin/amd64
+k10s_X.Y.Z_darwin_arm64.tar.gz     ✓
+k10s-vX.Y.Z-macos-x86_64.tar.gz    ✓  darwin/amd64
 k10s.Darwin.aarch64.tar.gz         ✓  darwin/arm64
 k10s-linux-x64.tgz                 ✓  linux/amd64
 k10s-linux-amd64                   ✓  bare binary, no archive
@@ -116,7 +148,7 @@ the list of what *was* published. It is never approximated.
 `internal/version` holds the stamp:
 
 ```
-go build -ldflags "-X github.com/p10node/k10s/internal/version.Version=v1.4.0 \
+go build -ldflags "-X github.com/p10node/k10s/internal/version.Version=vX.Y.Z \
                    -X github.com/p10node/k10s/internal/version.Commit=abc1234 \
                    -X github.com/p10node/k10s/internal/version.Date=2026-08-26"
 ```
@@ -138,13 +170,17 @@ which is the case a string comparison gets backwards.
 ## Publishing a release
 
 ```bash
-just tag v1.4.0        # tags and pushes; the workflow does the rest
+just tag vX.Y.Z        # tags and pushes; the workflow does the rest
 ```
 
 `.github/workflows/release.yml` builds `darwin/{amd64,arm64}`,
 `linux/{amd64,arm64}` and `windows/amd64`, writes `checksums.txt`, and
 publishes them with generated notes. `just release` does the same thing
 locally into `dist/` — same names, same manifest format.
+
+After a full release, `.github/workflows/homebrew.yml` points the Homebrew
+formula at it; [maintaining.md](maintaining.md#the-homebrew-tap) has the
+details.
 
 The naming and the manifest format are not cosmetic: they are what the
 matcher and the verifier read. `internal/update`'s end-to-end test installs

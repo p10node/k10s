@@ -26,6 +26,12 @@ import (
 //
 // The version comparison and the download live in internal/update; this file
 // is only the plumbing between them and the UI.
+//
+// A binary that a package manager installed (updOwner, from
+// update.InstalledBy) is that package manager's to replace: /update says
+// which command upgrades it instead of offering an install, and the daily
+// notice names that command. The check itself, and update.disabled, work as
+// they do for any other install.
 
 // updateClient builds the client from the persisted settings.
 func (m *Model) updateClient() *update.Client {
@@ -63,6 +69,12 @@ func (m *Model) autoCheckCmd() tea.Cmd {
 func (m *Model) startUpdate(arg string) tea.Cmd {
 	if arg == "skip" {
 		return m.skipRelease()
+	}
+	// A package manager's copy is the package manager's to replace: no
+	// check, no dialog, just the command that upgrades it.
+	if m.updOwner != nil {
+		m.toast = "k10s is " + m.updOwner.Hint()
+		return nil
 	}
 	if m.updBusy {
 		m.toast = "… an update is already running"
@@ -173,6 +185,10 @@ func (m *Model) handleUpdateCheck(msg updateCheckMsg) tea.Cmd {
 		return m.offerUpdate(msg.rel)
 	}
 	if !msg.newer || msg.rel.Version == m.updSkip {
+		return nil
+	}
+	if m.updOwner != nil {
+		m.toast = fmt.Sprintf("k10s %s is out (you have %s): run %s", msg.rel.Version, version.Current(), m.updOwner.Upgrade)
 		return nil
 	}
 	m.toast = fmt.Sprintf("⇧ k10s %s is out (you have %s) — /update to install", msg.rel.Version, version.Current())
@@ -313,6 +329,9 @@ func versionReport(m *Model) string {
 	var b strings.Builder
 	b.WriteString(version.String() + "\n\n")
 	fmt.Fprintf(&b, "  releases    %s\n", m.updateClient().Repository())
+	if m.updOwner != nil {
+		fmt.Fprintf(&b, "  installed   by %s, which updates it: %s\n", m.updOwner.Name, m.updOwner.Upgrade)
+	}
 
 	state := "on — once a day at startup"
 	if m.updDisabled {
@@ -329,6 +348,8 @@ func versionReport(m *Model) string {
 	switch {
 	case m.updRel == nil:
 		b.WriteString("  latest      not checked yet — run /update\n")
+	case m.updOwner != nil && update.Newer(version.Current(), m.updRel.Version):
+		fmt.Fprintf(&b, "  latest      %s: run %s\n", m.updRel.Version, m.updOwner.Upgrade)
 	case update.Newer(version.Current(), m.updRel.Version):
 		fmt.Fprintf(&b, "  latest      %s — run /update to install it\n", m.updRel.Version)
 	default:

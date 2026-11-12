@@ -208,7 +208,7 @@ restart into it. `/version` reports what is running and where updates come
 from without touching the network.
 
 The same check also runs once a day at startup and only speaks up when there
-is something newer, as a toast plus a clickable `⇧ 1.4.0` badge in the status
+is something newer, as a toast plus a clickable `⇧ X.Y.Z` badge in the status
 bar. Three levels of "not now":
 
 |                                 |                                                    |
