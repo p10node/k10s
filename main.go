@@ -255,7 +255,7 @@ usage:
                     needed) — k10s never shows this unless you ask for it
   k10s --readonly   look, never touch: no edit, scale, restart, cordon,
                     drain or delete, no shell or port-forward, and no
-                    dangerous plugins or typed shell commands. Every
+                    external plugins or typed shell commands. Every
                     request that could change the cluster is refused before
                     it leaves the machine. Works with demo too.
   k10s update       install the newest release over this binary
