@@ -140,7 +140,7 @@ Everything else still works: the sidebar, the prompt, `/help`, the theme
 picker. See [cluster-setup.md](cluster-setup.md) and
 [ui.md](ui.md#no-cluster).
 
-Applicable command plugins from `~/.k10s/plugins.yaml` are listed after the
+Applicable command plugins from `~/.config/k10s/plugins.yaml` are listed after the
 built-in actions. Their configured shortcut or a click runs them. Built-in
 keys win unless the plugin sets `override: true`; see [plugins.md](plugins.md).
 

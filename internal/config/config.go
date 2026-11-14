@@ -1,4 +1,5 @@
-// Package config persists user settings to ~/.k10s/config.yaml.
+// Package config persists user settings to config.yaml in the k10s config
+// directory (see Path).
 package config
 
 import (
@@ -85,17 +86,46 @@ const DefaultCLI = "kubectl"
 // CLIPresets are the names k10s recognises out of the box.
 var CLIPresets = []string{"kubectl", "k8s", "k"}
 
-// Path returns the config file location: $K10S_CONFIG if set,
-// otherwise ~/.k10s/config.yaml.
+// Path returns the config file location. First match wins:
+//
+//  1. $K10S_CONFIG
+//  2. ~/.k10s/config.yaml, while ~/.k10s exists and the XDG directory does
+//     not yet (installs from before k10s followed XDG keep their settings)
+//  3. $XDG_CONFIG_HOME/k10s/config.yaml, or ~/.config/k10s/config.yaml when
+//     XDG_CONFIG_HOME is unset or not an absolute path (per the XDG spec)
+//
+// Plugins and custom themes live beside this file, so they follow it.
 func Path() string {
 	if p := os.Getenv("K10S_CONFIG"); p != "" {
 		return p
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := configDir()
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(home, ".k10s", "config.yaml")
+	return filepath.Join(dir, "config.yaml")
+}
+
+func configDir() string {
+	home, _ := os.UserHomeDir()
+	xdg := ""
+	if base := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(base) {
+		xdg = filepath.Join(base, "k10s")
+	} else if home != "" {
+		xdg = filepath.Join(home, ".config", "k10s")
+	}
+	if home != "" {
+		legacy := filepath.Join(home, ".k10s")
+		if isDir(legacy) && !isDir(xdg) {
+			return legacy
+		}
+	}
+	return xdg
+}
+
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 // Load reads the config file; a missing file returns zero values, nil error.
@@ -117,7 +147,7 @@ func Load() (Config, error) {
 }
 
 // Save writes the config file (0600 — it can hold an API key), creating
-// ~/.k10s if needed.
+// the config directory if needed.
 func Save(c Config) error {
 	p := Path()
 	if p == "" {

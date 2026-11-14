@@ -1,16 +1,22 @@
 # Config file
 
-`internal/config` persists settings to `~/.k10s/config.yaml` (override with
-`K10S_CONFIG=/path/to/file`, used by `cmd/shot` in tests so it never touches
-a real user's file).
+`internal/config` persists settings to `$XDG_CONFIG_HOME/k10s/config.yaml`
+(`~/.config/k10s/config.yaml` when `XDG_CONFIG_HOME` is unset or not an
+absolute path). Override with `K10S_CONFIG=/path/to/file`, used by `cmd/shot`
+in tests so it never touches a real user's file.
+
+An existing `~/.k10s` directory keeps being used as long as the XDG directory
+does not exist, so upgrading loses nothing. To migrate, move it **before**
+creating anything under the XDG path (creating `~/.config/k10s` switches k10s
+over to it): `mv ~/.k10s ~/.config/k10s`.
 
 Custom themes live in the adjacent `themes/` folder (normally
-`~/.k10s/themes`) and can be moved independently with `K10S_THEME_DIR`. Theme
+`~/.config/k10s/themes`) and can be moved independently with `K10S_THEME_DIR`. Theme
 files are documented in [themes.md](themes.md); only the selected theme name
 is stored in `config.yaml`.
 
-Command plugins are separate too: `~/.k10s/plugins.yaml` and YAML snippets
-under `~/.k10s/plugins/`. They use the k9s plugin format and are documented in
+Command plugins are separate too: `plugins.yaml` and YAML snippets under
+`plugins/`, both beside `config.yaml`. They use the k9s plugin format and are documented in
 [plugins.md](plugins.md); plugin definitions are never rewritten by k10s.
 
 ## What's saved
@@ -47,7 +53,7 @@ in a YAML library isn't worth it. Values round-trip through Go string quoting on
 nothing fancier (lists, multi-line, anchors) is needed or supported.
 
 File permissions are `0600` since the file can hold an API key; the parent
-directory `~/.k10s` is created with `0755` on first save.
+directory is created with `0755` on first save.
 
 `collapsed` lists the Resources-pane groups folded away. It is written on
 every save, and **`"-"` means "none, deliberately"** — an empty value would
