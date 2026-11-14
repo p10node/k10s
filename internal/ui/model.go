@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strconv"
@@ -226,9 +227,13 @@ type Model struct {
 	connecting bool
 	connGen    int
 	connName   string
+	// credPlugin and termStderr are Startup.CredentialPlugin and
+	// Startup.TerminalStderr; see connect.go.
+	credPlugin func(context string) string
+	termStderr io.Writer
 
 	// readOnly is --readonly. Actions that change the cluster or open a
-	// session into it are hidden and refused, and so are dangerous plugins
+	// session into it are hidden and refused, and so are external plugins
 	// and typed shell commands; see domain.ReadOnlyAllows.
 	readOnly bool
 
@@ -1148,7 +1153,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return editExitMsg{source: msg.source, original: msg.original, session: msg.session, kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 			}
 		}
-		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		return m, tea.ExecProcess(m.toTerminal(c), func(err error) tea.Msg {
 			return editExitMsg{source: msg.source, original: msg.original, session: msg.session, kind: msg.kind, ns: msg.ns, name: msg.name, path: msg.path, err: err}
 		})
 

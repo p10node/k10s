@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -97,6 +99,12 @@ func main() {
 	}
 
 	k8s.SilenceLogging()
+	// Credential plugins (tsh, aws, kubelogin) write to whatever os.Stderr
+	// is when the first client is built. From here on that is a pipe k10s
+	// reads, so a plugin's complaint reaches the No cluster panel instead of
+	// the raw terminal under the TUI; the terminal itself goes only to
+	// processes that are meant to have it.
+	terminal := k8s.CaptureStderr()
 	// Before the first connection: only clients built after this carry the
 	// guard.
 	if readOnly {
@@ -120,16 +128,21 @@ func main() {
 	}
 
 	m := ui.NewStartup(ui.Startup{
-		Kinds:    k8s.Kinds(),
-		Contexts: ctxNames,
-		Context:  curCtx,
-		Connect:  newSource,
-		ReadOnly: readOnly,
+		Kinds:            k8s.Kinds(),
+		Contexts:         ctxNames,
+		Context:          curCtx,
+		Connect:          newSource,
+		ReadOnly:         readOnly,
+		CredentialPlugin: func(ctx string) string { return k8s.CredentialPlugin("", ctx) },
+		TerminalStderr:   terminal,
 	})
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "k10s:", err)
+	_, runErr := p.Run()
+	// The TUI is gone; whatever is said from here belongs on the screen.
+	k8s.ReleaseStderr()
+	if runErr != nil {
+		tuiFailed(os.Stderr, runErr)
 		os.Exit(1)
 	}
 
@@ -147,6 +160,21 @@ func main() {
 		}
 	}
 }
+
+// tuiFailed reports the error the TUI ended with. After a panic it first
+// writes what the stderr pipe caught: Bubble Tea prints the panic itself to
+// stdout but its stack trace to os.Stderr, which was the pipe until Run
+// returned, and a crash report needs the trace to say where it happened.
+func tuiFailed(w io.Writer, runErr error) {
+	if errors.Is(runErr, tea.ErrProgramPanic) {
+		_, _ = w.Write(drainStderr(time.Second))
+	}
+	fmt.Fprintln(w, "k10s:", runErr)
+}
+
+// drainStderr is k8s.DrainStderr. A variable so a test can stand in for the
+// pipe, which a process captures only once.
+var drainStderr = k8s.DrainStderr
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
 // with a progress line instead of a modal.
@@ -227,7 +255,7 @@ usage:
                     needed) — k10s never shows this unless you ask for it
   k10s --readonly   look, never touch: no edit, scale, restart, cordon,
                     drain or delete, no shell or port-forward, and no
-                    dangerous plugins or typed shell commands. Every
+                    external plugins or typed shell commands. Every
                     request that could change the cluster is refused before
                     it leaves the machine. Works with demo too.
   k10s update       install the newest release over this binary
