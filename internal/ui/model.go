@@ -1761,6 +1761,12 @@ func (m *Model) scrollMain(delta int) {
 		m.textTop = clamp(m.textTop+delta, 0, maxi(0, len(m.textLines)-(m.layout().midH-2)))
 		return
 	}
+	if m.mode == modeShell {
+		// The pane shows the shell, so the table behind it is not what the
+		// wheel is over. Falling through moved its selection, and detaching
+		// then landed on a different row.
+		return
+	}
 	_, rows := m.tableData()
 	m.rowIdx = clamp(m.rowIdx+delta, 0, maxi(0, len(rows)-1))
 	m.rowMem[m.curKind().Key] = m.rowIdx
