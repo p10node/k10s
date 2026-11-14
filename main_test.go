@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
+	"github.com/p10node/k10s/internal/k8s"
 	"github.com/p10node/k10s/internal/update"
 )
 
@@ -92,5 +97,47 @@ func TestSelfUpdateStepsAsideForAPackageManager(t *testing.T) {
 	}
 	if want := "installed by Homebrew, which updates it: run brew upgrade k10s"; err.Error() != want {
 		t.Errorf("selfUpdate error = %q, want %q", err, want)
+	}
+}
+
+// A credential plugin's own words survive the trim: they are the actionable
+// part, and nothing in them is advice aimed at another tool.
+func TestNoClusterReasonKeepsACredentialPluginsWords(t *testing.T) {
+	err := &k8s.CredentialPluginError{
+		Plugin: "tsh",
+		Said:   "Having problems with relogin, please use 'tsh login/tsh kube login' manually",
+		Err:    errors.New("getting credentials: exec: executable tsh failed with exit code 1"),
+	}
+	want := "credential plugin tsh: Having problems with relogin, please use 'tsh login/tsh kube login' manually"
+	if got := noClusterReason(err); got != want {
+		t.Errorf("noClusterReason = %q\n              want %q", got, want)
+	}
+}
+
+// After a panic tuiFailed writes what the stderr pipe caught ahead of its own
+// line; after any other error it leaves the pipe alone.
+func TestTUIFailedPutsTheStackTraceFirst(t *testing.T) {
+	prev := drainStderr
+	t.Cleanup(func() { drainStderr = prev })
+	drained := 0
+	drainStderr = func(time.Duration) []byte {
+		drained++
+		return []byte("goroutine 1 [running]:\n\tmain.go:10\n")
+	}
+
+	panicked := fmt.Errorf("%w: %w", tea.ErrProgramKilled, tea.ErrProgramPanic)
+	var out bytes.Buffer
+	tuiFailed(&out, panicked)
+	if want := "goroutine 1 [running]:\n\tmain.go:10\nk10s: " + panicked.Error() + "\n"; out.String() != want {
+		t.Errorf("after a panic tuiFailed wrote %q, want %q", out.String(), want)
+	}
+
+	out.Reset()
+	tuiFailed(&out, tea.ErrProgramKilled)
+	if want := "k10s: " + tea.ErrProgramKilled.Error() + "\n"; out.String() != want {
+		t.Errorf("after a kill tuiFailed wrote %q, want %q", out.String(), want)
+	}
+	if drained != 1 {
+		t.Errorf("the pipe was drained %d times, want 1: after the panic only", drained)
 	}
 }

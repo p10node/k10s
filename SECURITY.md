@@ -79,12 +79,13 @@ chose to run, so anyone who can write to `~/.config/k10s/plugins.yaml` can alrea
 run commands as you; that is not a vulnerability in k10s. k10s runs the
 plugin's command directly, never through a shell of its own, and fills
 object names, namespaces and column values into its arguments as text. When
-the command is `sh`, `bash`, `zsh`, `dash` or `ksh` with `-c`, the script
-gets them as environment variables instead of having them pasted into its
-text. k10s itself turning a value from the cluster into code, or a plugin
-with `confirm: true` that runs without asking, is a vulnerability. What a
-plugin's own script or program does with those values, as with `python3 -c`
-or `kubectl exec ... -- sh -c`, is up to the plugin. See
+the command is `sh`, `bash`, `zsh`, `dash` or `ksh` with `-c`, run directly
+or through `env` or `busybox`, the script gets them as environment variables
+instead of having them pasted into its text. k10s itself turning a value
+from the cluster into code, or a plugin with `confirm: true` that runs
+without asking, is a vulnerability. What a plugin's own script or program
+does with those values, as with `python3 -c`, `env -S` or
+`kubectl exec ... -- sh -c`, is up to the plugin. See
 [docs/plugins.md](docs/plugins.md).
 
 **The installer and uninstaller**, `install.sh` and `uninstall.sh`, are in
