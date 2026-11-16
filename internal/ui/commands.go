@@ -285,6 +285,8 @@ func Help() string {
     d describe · y yaml · l logs (follow, when live)
     s shell — a real interactive shell rendered inside the main panel;
       ctrl+] detaches. The rest of k10s stays visible while you are in it.
+    S shell in the terminal — quits k10s and opens the same pod shell in
+      the terminal k10s was started from; exit it to get your prompt back.
     p port-forward (real) · r rollout restart · c scale (prompts for n)
     e edit (opens $EDITOR on live YAML) · m top (metrics-server)
     o cordon/uncordon · u drain (nodes only)

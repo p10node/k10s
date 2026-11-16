@@ -156,6 +156,14 @@ Workloads resolve to one of their pods, the same way logs do. Backends
 without a shell (the offline demo) say so in the status bar rather than
 failing.
 
+`S` is for when you want the real terminal instead: its scrollback,
+selection, fonts and colours. It **quits k10s** and runs the same shell, on
+the same pod and container `s` would pick, in the terminal you started k10s
+from. Exiting the shell returns you to your prompt, and k10s exits with the
+shell's exit code, like `kubectl exec -it`. Inside the in-panel shell `S` is
+just a key for the pod, so detach first. Like `s`, it is not offered in
+`--readonly`, and on the demo it says there is no shell instead of quitting.
+
 ### Contexts
 
 `:ctx` lists kubeconfig contexts in the main panel, numbered like a
@@ -275,6 +283,8 @@ Notable behavior:
 - **Logs** (`l`) follows the stream live, like `kubectl logs -f`.
 - **Shell** (`s`) opens a real interactive exec session **inside the main
   panel** — see below.
+- **Shell (terminal)** (`S`) **quits k10s** and opens the same shell in the
+  terminal you started it from — see below.
 - **Port Forward** (`p`) starts a real forward on an ephemeral local port and
   toasts the address; pressing it again stops that forward, or cancels it
   while it is still connecting.
