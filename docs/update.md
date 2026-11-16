@@ -197,7 +197,7 @@ It skips when `dist/` is empty.
 
 Resolution order, most specific first:
 
-1. `update.repo` in `~/.k10s/config.yaml`
+1. `update.repo` in `~/.config/k10s/config.yaml`
 2. `$K10S_UPDATE_REPO`
 3. `update.DefaultRepo` — compiled in
 

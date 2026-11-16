@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"io"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -40,6 +42,16 @@ type Startup struct {
 	// open a session into it, is hidden and refused. internal/k8s enforces
 	// the same rule on the wire; this is the part the user sees.
 	ReadOnly bool
+	// CredentialPlugin names the exec plugin a context signs in with ("tsh",
+	// "aws"), or "" — read from kubeconfig, no request made. A plugin
+	// minting a certificate is the slow part of connecting and the part the
+	// user can do something about, so the connecting toast names it.
+	CredentialPlugin func(context string) string
+	// TerminalStderr is where a process that takes the terminal over (the
+	// editor, a foreground plugin) writes its errors. While k10s runs,
+	// os.Stderr is a pipe that collects what credential plugins say (see
+	// k8s.CaptureStderr), and Bubble Tea would hand the process that pipe.
+	TerminalStderr io.Writer
 }
 
 // NewStartup builds a model that is already renderable and connects in the
@@ -48,6 +60,8 @@ func NewStartup(s Startup) *Model {
 	m := New(&pendingSource{kinds: s.Kinds, contexts: s.Contexts, ctx: s.Context})
 	m.connect = s.Connect
 	m.readOnly = s.ReadOnly
+	m.credPlugin = s.CredentialPlugin
+	m.termStderr = s.TerminalStderr
 	// A demo context is not something kubeconfig can hand back, so it has to
 	// be asked for by name; anything else stays "" — kubeconfig's
 	// current-context is the only cluster k10s opens on by itself.
@@ -60,8 +74,30 @@ func NewStartup(s Startup) *Model {
 	m.kubeCtxs = append([]string(nil), s.Contexts...)
 	m.connecting = true
 	m.connName = s.Context
-	m.toast = m.withThemeWarning("connecting…")
+	m.toast = m.connectingToast("connecting…", s.Context)
 	return m
+}
+
+// connectingToast is the status line while Connect runs. When the context
+// signs in through a credential plugin, that is what the wait is for, and
+// naming it ("… connecting · credentials from tsh") tells the user which
+// tool to go and log in with if the wait never ends.
+func (m *Model) connectingToast(base, name string) string {
+	if m.credPlugin != nil {
+		if p := m.credPlugin(name); p != "" {
+			base += " · credentials from " + p
+		}
+	}
+	return m.withThemeWarning(base)
+}
+
+// toTerminal points a process that is about to take the terminal over at
+// the terminal's own stderr; see Startup.TerminalStderr.
+func (m *Model) toTerminal(c *exec.Cmd) *exec.Cmd {
+	if m.termStderr != nil && c.Stderr == nil {
+		c.Stderr = m.termStderr
+	}
+	return c
 }
 
 // connectCmd runs Connect off the event loop. Each attempt carries a
@@ -80,7 +116,7 @@ func (m *Model) connectCmd(name string) tea.Cmd {
 	if name == "" {
 		m.connName = m.src.ClusterInfo().Context
 	}
-	m.toast = m.withThemeWarning("… connecting")
+	m.toast = m.connectingToast("… connecting", name)
 	return func() tea.Msg {
 		src, warn := fn(name)
 		return srcConnectedMsg{gen: gen, src: src, warn: warn}

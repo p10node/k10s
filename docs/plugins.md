@@ -8,8 +8,8 @@ Applicable plugins appear in the Actions pane and can also be clicked.
 
 k10s loads these at startup, in order:
 
-1. `~/.k10s/plugins.yaml`
-2. every `.yaml` or `.yml` file recursively under `~/.k10s/plugins/`
+1. `~/.config/k10s/plugins.yaml` (`$XDG_CONFIG_HOME/k10s/` when set)
+2. every `.yaml` or `.yml` file recursively under `~/.config/k10s/plugins/`
 
 Files in the directory override an earlier plugin with the same name. Use
 `K10S_PLUGINS` and `K10S_PLUGIN_DIR` to override the two locations. When
@@ -85,6 +85,21 @@ args:
   - -c
   - kubectl get pod "$NAME" -n "$NAMESPACE" -o json | jq .status
 ```
+
+k10s does not paste values into the script a shell runs with `-c`. When the
+command is `sh`, `bash`, `zsh`, `dash` or `ksh`, run directly or through
+`env` or `busybox`, the script reads `$NAME`, `$NAMESPACE` and the other
+variables from the environment, and `$COL-STATUS` becomes
+`${K10S_COL_<hex>}`, so a value is never read as shell syntax. Quote them as
+any shell variable: `"$NAME"`, not `'$NAME'`, which the shell leaves as it is.
+Options such as `-x` or `-o pipefail` may come before or after `-c`, and `--`
+may end them. Arguments after the script, which the shell passes as `$0`,
+`$1` and so on, get the values as text. When k10s cannot tell which argument
+is the script, for an option it does not read such as bash's `-O`, every
+argument reads the values from the environment. `env -S` is not a way to a
+shell: it builds a command line of its own from a string and expands
+`${VAR}` in it, so k10s fills values into that string as text, as it does
+for `python3 -c`.
 
 Foreground commands temporarily leave the alternate screen and inherit the
 terminal, so interactive tools such as `fzf` work. Background commands have no

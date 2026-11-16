@@ -136,7 +136,7 @@ func (m *Model) runPlugin(item plugin.Named, vars plugin.Vars) tea.Cmd {
 	}
 
 	m.toast = "⟩ plugin " + label
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+	return tea.ExecProcess(m.toTerminal(cmd), func(err error) tea.Msg {
 		msg := foregroundPluginResult(item, label, err)
 		msg.session = session
 		return msg

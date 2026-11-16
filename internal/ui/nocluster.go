@@ -100,7 +100,17 @@ func (m *Model) noClusterLines(inner int) []string {
 		"",
 	}
 	if m.offlineWhy != "" {
-		out = append(out, line(th.Err, m.offlineWhy), "")
+		// Wrapped, not truncated: a credential plugin's reason ("Having
+		// problems with relogin, please use 'tsh login/tsh kube login'
+		// manually") carries the fix in its second half.
+		why := wrapLine(m.offlineWhy, inner-len(pad))
+		if len(why) > 3 {
+			why = why[:3]
+		}
+		for _, w := range why {
+			out = append(out, line(th.Err, w))
+		}
+		out = append(out, "")
 	}
 	out = append(out,
 		line(th.Subtle, "k10s reads the same kubeconfig kubectl does — $KUBECONFIG,"),
@@ -200,6 +210,22 @@ whatever that context can reach. No kubeconfig, no cluster, nothing to show.
 
     If the last one fails, k10s cannot connect either — that is the thing
     to fix, and it is not a k10s problem.
+
+  5 · CREDENTIAL PLUGINS (tsh, aws, gke-gcloud-auth-plugin, kubelogin)
+
+    Many kubeconfigs name a program that fetches the token instead of
+    holding one. kubectl lets that program use the terminal, to ask for
+    an MFA code; k10s cannot — the TUI owns the keyboard — so it runs the
+    plugin without one, and the plugin fails fast instead of waiting.
+    The panel then shows the plugin's own last line, e.g.
+
+      credential plugin tsh: Having problems with relogin, please use
+      'tsh login/tsh kube login' manually
+
+    Log in with that tool in another shell (tsh login, aws sso login,
+    az login…), then press r. Teleport with per-session MFA, or behind
+    an L7 load balancer, wants its local proxy instead:
+      tsh proxy kube <cluster> --exec      then run k10s in that shell
 
   IN k10s
 
