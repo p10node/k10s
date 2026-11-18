@@ -278,7 +278,7 @@ The short version - the [full reference is here](docs/keybindings.md).
 |----------------------------------------|------------------------------------------------------|
 | `tab` / `shift+tab`                    | cycle panes                                          |
 | `left` / `right`                       | resource list / main pane                            |
-| `↑↓` (`j`/`k`) · `pgup/pgdn` · `g`/`G` | move · page · first/last                             |
+| `↑↓` · `pgup/pgdn` · `g`/`G`           | move · page · first/last                             |
 | type (Resources focused)               | instant kind filter · `esc` clears                   |
 | `f`                                    | find: search every column of the open table          |
 | `ctrl+p`                               | **search everything** - kinds and objects in one box |
