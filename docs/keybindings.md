@@ -6,8 +6,8 @@
 |------------------------|-------------------------------------------------------------------------------------------------------------------------------|
 | `ctrl+c`               | quit (always)                                                                                                                 |
 | `q`                    | quit (when not typing in a search box or prompt)                                                                              |
-| `tab` / `shift+tab`    | cycle panes Resources → Main → Actions                                                                                        |
-| `←` `h` / `→`          | focus resource list / main pane                                                                                               |
+| `tab` / `shift+tab`    | cycle panes Resources → Main → command box                                                                                    |
+| `←` / `→`              | focus resource list (from the main pane) / main pane (from the list)                                                          |
 | `enter` / double-click | open the selected item — logs if it has them, else describe. On the Namespaces table it switches namespace and shows its pods |
 | `z`                    | zoom / restore main pane                                                                                                      |
 | `esc`                  | close text view → restore zoom (in that order)                                                                                |
@@ -62,6 +62,10 @@ Ctrl, Alt and Shift. In iTerm2, WezTerm or Ghostty you can map Cmd+K to
 other way. The **Actions pane is not in the cycle**: every action already has
 a hotkey and a clickable row, so a tab stop there would lead nowhere.
 
+`left` in the main pane goes straight to the resource list, and `right` or
+`enter` there comes back. While the main pane is zoomed, `left` stays put:
+the list is off screen.
+
 Clicking a resource row or an action acts on it without moving focus. The
 Resources pane scrolls with the wheel **without changing what is selected**
 — scrolling is looking, not picking, so the main panel stays where you left
@@ -69,9 +73,10 @@ it. The Actions pane does not scroll; it is never taller than its list.
 
 ## Resource list (left pane)
 
-`tab` to focus it. Any printable key then filters the list; `↑↓` moves,
-`enter` or `→` returns to the table, `esc` clears. The active filter appears
-in the panel title, with the match counter in its top-right tag.
+`left` from the main pane, or `tab`, focuses it. Any printable key then
+filters the list; `↑↓` moves, `enter` or `→` returns to the table, `esc`
+clears. The active filter appears in the panel title, with the match counter
+in its top-right tag.
 
 `space` folds or unfolds the group under the cursor and `left` folds it;
 clicking a `▾`/`▸` header does either. Config, Storage and RBAC start folded.

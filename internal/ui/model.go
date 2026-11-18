@@ -1588,6 +1588,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.focusNext(1)
 	case "shift+tab":
 		return m.focusNext(-1)
+	case "left":
+		// The arrow's way to the resource list, the mirror of "right" there.
+		// Zoomed, the list is off screen, so there is nowhere to go. "h" is
+		// not bound with it: docs/plan.md gives "h" to Helm's history.
+		if !m.zoomed {
+			m.focus = focusList
+		}
 	case "T":
 		m.themeIdx = (m.themeIdx + 1) % len(m.themes)
 		m.toast = "theme → " + m.th().Name

@@ -254,7 +254,7 @@ func Help() string {
                         is open it scrolls the popup, never what is behind it
 
   RESOURCE LIST (left pane)
-    tab                 focus it
+    left / tab          focus it (left from the main pane, unless zoomed)
     type to search      any letters filter the list instantly; the active
                         filter shows in the panel title. A search looks
                         inside folded groups too.
