@@ -121,6 +121,49 @@ func TestTabCycleReturnsToStart(t *testing.T) {
 	}
 }
 
+// Left takes the keyboard from the main pane to the resource list without a
+// lap of tab, and right comes back.
+func TestLeftFocusesTheResourceListAndRightComesBack(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusMain
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.focus != focusList {
+		t.Fatalf("left from the main pane landed on %v, want focusList", m.focus)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if m.focus != focusMain {
+		t.Fatalf("right from the resource list landed on %v, want focusMain", m.focus)
+	}
+}
+
+// Moving focus is not picking: the view open in the main pane stays open.
+func TestLeftKeepsTheOpenView(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	openLogs(t, m)
+	m.focus = focusMain
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.focus != focusList || m.mode != modeLogs {
+		t.Errorf("after left: focus %v, mode %v; want focusList with the log view still open", m.focus, m.mode)
+	}
+}
+
+// Zoomed, the resource list is off screen, so left has nowhere to go.
+func TestLeftWhileZoomedStaysInTheMainPane(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusMain
+	m.setZoomed(true)
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.focus != focusMain {
+		t.Errorf("left while zoomed landed on %v, want focusMain", m.focus)
+	}
+}
+
 // The resource pane is focusable again, and typing there filters the list.
 func TestResourcePaneIsFocusableAndFilters(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
