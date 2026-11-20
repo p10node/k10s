@@ -10,7 +10,7 @@ import (
 	"github.com/p10node/k10s/internal/config"
 )
 
-// One settings modal covering what is persisted to ~/.k10s/config.yaml and
+// One settings modal covering what is persisted to config.yaml and
 // still adjustable: the CLI name used in hints, and whether k10s looks for a
 // newer release at startup. It also held the AI provider details until that
 // feature was switched off (aidisabled.go).

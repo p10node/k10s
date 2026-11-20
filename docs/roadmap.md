@@ -67,7 +67,7 @@ undo by accident.
   (`update.DefaultRepo`), but this tree has no tags, so `/update` reports
   "no published releases" until `just tag v0.1.0` pushes one. A fork can
   point elsewhere with `K10S_UPDATE_REPO` / `update.repo`.
-- **The API key is stored as plain text** in `~/.k10s/config.yaml` (mode
+- **The API key is stored as plain text** in `~/.config/k10s/config.yaml` (mode
   0600), masked only in the UI. Swapping in an OS keychain behind the same
   `AI.APIKey` field is the fix if that's not acceptable.
 - **Untested against a real cluster by its author.** Every live path is

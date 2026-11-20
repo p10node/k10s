@@ -2,7 +2,7 @@ package k8s
 
 import "github.com/p10node/k10s/internal/domain"
 
-var podActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AShell, domain.APortFwd, domain.ATop, domain.AEdit, domain.ADelete}
+var podActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.AShell, domain.AShellOut, domain.APortFwd, domain.ATop, domain.AEdit, domain.ADelete}
 var wlActions = []string{domain.ADescribe, domain.AYAML, domain.ALogs, domain.ARestart, domain.AScale, domain.AEdit, domain.ADelete}
 var basicActions = []string{domain.ADescribe, domain.AYAML, domain.AEdit, domain.ADelete}
 var nodeActions = []string{domain.ADescribe, domain.AYAML, domain.ATop, domain.ACordon, domain.ADrain, domain.AEdit}

@@ -32,7 +32,7 @@ var special = map[string]tea.KeyType{
 }
 
 func main() {
-	// Never touch the user's real ~/.k10s from the dev renderer, and never
+	// Never touch the user's real k10s config directory from the dev renderer, and never
 	// share state between invocations either — each run gets its own throwaway
 	// path unless the caller sets K10S_CONFIG explicitly (e.g. to test
 	// persistence across two shot calls on purpose).

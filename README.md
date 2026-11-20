@@ -58,7 +58,7 @@ and **how little you have to remember**.
   running binary - checksum-verified, atomic, offers to restart into it. On
   a Homebrew install it points at `brew upgrade k10s` instead.
 - **Your k9s-style command plugins fit.** Put scoped shortcuts in
-  `~/.k10s/plugins.yaml`; they appear beside built-in actions and receive the
+  `~/.config/k10s/plugins.yaml`; they appear beside built-in actions and receive the
   selected object, namespace, context and column values.
 
 ## Try it in 30 seconds (no cluster required)
@@ -175,6 +175,7 @@ ClusterRoleBindings · Nodes · Namespaces · Events · CRDs · Custom Resources
 | `y` YAML                           | the live object                                                   |
 | `l` logs                           | **follows** (`-f`), newest at the bottom, scroll back 500 lines   |
 | `s` shell                          | a real interactive exec session - raw TTY, resize-aware, in-panel |
+| `S` shell (terminal)               | quits k10s into the same shell, in your own terminal              |
 | `p` port-forward                   | real SPDY forward, start/stop from the pane                       |
 | `m` top                            | pod/node metrics, per container, with requests vs limits          |
 | `e` edit · `r` restart · `c` scale | rollout restart, scale, `$EDITOR`                                 |
@@ -230,7 +231,7 @@ from this disabled integration.
 
 `T` cycles, `/theme` opens a picker that **applies each theme as you move
 through the list** - you judge it on the real UI, not on a name - and `esc`
-puts back whatever you had. Drop a YAML palette into `~/.k10s/themes`, restart,
+puts back whatever you had. Drop a YAML palette into `~/.config/k10s/themes`, restart,
 and it appears in the same picker — no rebuild needed. See the
 [custom-theme guide and installable demo](docs/themes.md).
 
@@ -276,7 +277,8 @@ The short version - the [full reference is here](docs/keybindings.md).
 | Key                                    | Action                                               |
 |----------------------------------------|------------------------------------------------------|
 | `tab` / `shift+tab`                    | cycle panes                                          |
-| `↑↓` (`j`/`k`) · `pgup/pgdn` · `g`/`G` | move · page · first/last                             |
+| `left` / `right`                       | resource list / main pane                            |
+| `↑↓` · `pgup/pgdn` · `g`/`G`           | move · page · first/last                             |
 | type (Resources focused)               | instant kind filter · `esc` clears                   |
 | `f`                                    | find: search every column of the open table          |
 | `ctrl+p`                               | **search everything** - kinds and objects in one box |
@@ -334,7 +336,7 @@ talk to. `:ctx <name>` switches for the session without touching kubeconfig;
 `kubectl config use-context` is what changes where it opens next time.
 
 Theme, namespace, folded sidebar groups, AI settings and the update check
-persist to `~/.k10s/config.yaml` (override with `K10S_CONFIG`), saved on
+persist to `~/.config/k10s/config.yaml` (`$XDG_CONFIG_HOME/k10s` when set; override with `K10S_CONFIG`), saved on
 every change.
 See [config.md](docs/config.md).
 

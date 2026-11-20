@@ -222,7 +222,7 @@ prompts without a TTY.
 
 | Flag              | Environment        | Effect                                                |
 |-------------------|--------------------|-------------------------------------------------------|
-| `--purge`         | `K10S_PURGE=1`     | also delete `~/.k10s`                                 |
+| `--purge`         | `K10S_PURGE=1`     | also delete the config directory                     |
 | `--keep-config`   | —                  | keep it, and drop the reminder that it is still there |
 | `--dir <path>`    | `K10S_INSTALL_DIR` | look only there                                       |
 | `--dry-run`, `-n` | —                  | list, remove nothing                                  |
@@ -233,5 +233,5 @@ By hand, it is two lines:
 
 ```bash
 rm "$(command -v k10s)"
-rm -rf ~/.k10s          # config + theme choice, see config.md
+rm -rf ~/.config/k10s   # config + theme choice (~/.k10s on older installs), see config.md
 ```

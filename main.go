@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
+	utilexec "k8s.io/client-go/util/exec"
 
 	"github.com/p10node/k10s/internal/config"
 	"github.com/p10node/k10s/internal/domain"
@@ -140,8 +143,18 @@ func main() {
 	// The TUI is gone; whatever is said from here belongs on the screen.
 	k8s.ReleaseStderr()
 	if runErr != nil {
-		fmt.Fprintln(os.Stderr, "k10s:", runErr)
+		tuiFailed(os.Stderr, runErr)
 		os.Exit(1)
+	}
+
+	// Set when the user pressed S. Run tears the alt screen down, so the pod
+	// shell gets the plain terminal k10s was started from, and k10s exits
+	// with the shell's exit code.
+	if c, target := m.ExitShell(); c != nil {
+		if code := runExitShell(c, target); code != 0 {
+			os.Exit(code)
+		}
+		return
 	}
 
 	// Set when the user accepted the restart offer after /update installed a
@@ -158,6 +171,44 @@ func main() {
 		}
 	}
 }
+
+// runExitShell runs the shell S asked for on this process's terminal and
+// returns the code to exit with: the remote shell's own, or 1 when the
+// session failed.
+func runExitShell(c tea.ExecCommand, target string) int {
+	c.SetStdin(os.Stdin)
+	c.SetStdout(os.Stdout)
+	c.SetStderr(os.Stderr)
+	fmt.Fprintf(os.Stderr, "k10s: shell into %s — exit the shell to get your prompt back\n", target)
+
+	err := c.Run()
+	if err == nil {
+		return 0
+	}
+	// remotecommand reports a non-zero exit of the remote shell as a
+	// CodeExitError. That is the shell's result, not a k10s failure.
+	var exit utilexec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitStatus()
+	}
+	fmt.Fprintln(os.Stderr, "k10s:", err)
+	return 1
+}
+
+// tuiFailed reports the error the TUI ended with. After a panic it first
+// writes what the stderr pipe caught: Bubble Tea prints the panic itself to
+// stdout but its stack trace to os.Stderr, which was the pipe until Run
+// returned, and a crash report needs the trace to say where it happened.
+func tuiFailed(w io.Writer, runErr error) {
+	if errors.Is(runErr, tea.ErrProgramPanic) {
+		_, _ = w.Write(drainStderr(time.Second))
+	}
+	fmt.Fprintln(w, "k10s:", runErr)
+}
+
+// drainStderr is k8s.DrainStderr. A variable so a test can stand in for the
+// pipe, which a process captures only once.
+var drainStderr = k8s.DrainStderr
 
 // selfUpdate is `k10s update`: the same install the TUI's /update performs,
 // with a progress line instead of a modal.

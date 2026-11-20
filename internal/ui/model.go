@@ -290,6 +290,11 @@ type Model struct {
 	relaunch    bool
 	sourceOwner *sourceLease
 	viewGen     int
+
+	// Set when S resolved a shell: k10s quits and main.go runs it in the
+	// terminal (see ExitShell).
+	exitShell       tea.ExecCommand
+	exitShellTarget string
 }
 
 // New builds the UI model against src (either a real k8s.Store or the
@@ -335,7 +340,7 @@ func New(src domain.Source) *Model {
 	return m
 }
 
-// loadConfig applies ~/.k10s/config.yaml (or $K10S_CONFIG) on startup.
+// loadConfig applies config.Path() ($K10S_CONFIG or the XDG config dir) on startup.
 func (m *Model) loadConfig() {
 	c, err := config.Load()
 	m.logLimits = c.Logs
@@ -1077,6 +1082,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast = "shell into " + msg.name + " · " + detachKey + " to detach"
 		return m, waitShellOut(m.shellGen, msg.sess.Output())
 
+	case externalShellMsg:
+		return m, m.handleExternalShell(msg)
+
 	case shellOutMsg:
 		if msg.gen != m.shellGen || m.shellTerm == nil {
 			return m, nil // a stale session's output
@@ -1580,6 +1588,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.focusNext(1)
 	case "shift+tab":
 		return m.focusNext(-1)
+	case "left":
+		// The arrow's way to the resource list, the mirror of "right" there.
+		// Zoomed, the list is off screen, so there is nowhere to go. "h" is
+		// not bound with it: docs/plan.md gives "h" to Helm's history.
+		if !m.zoomed {
+			m.focus = focusList
+		}
 	case "T":
 		m.themeIdx = (m.themeIdx + 1) % len(m.themes)
 		m.toast = "theme → " + m.th().Name
@@ -2136,6 +2151,8 @@ func (m *Model) fireAction(a Action) tea.Cmd {
 		}
 	case domain.AShell:
 		return m.startShellSession(kind, ns, name)
+	case domain.AShellOut:
+		return m.startExternalShell(src, r.Short, kind, ns, name)
 	case domain.APortFwd:
 		return m.startPortForward(kind, ns, name)
 	case domain.AEdit:

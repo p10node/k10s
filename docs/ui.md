@@ -156,6 +156,14 @@ Workloads resolve to one of their pods, the same way logs do. Backends
 without a shell (the offline demo) say so in the status bar rather than
 failing.
 
+`S` is for when you want the real terminal instead: its scrollback,
+selection, fonts and colours. It **quits k10s** and runs the same shell, on
+the same pod and container `s` would pick, in the terminal you started k10s
+from. Exiting the shell returns you to your prompt, and k10s exits with the
+shell's exit code, like `kubectl exec -it`. Inside the in-panel shell `S` is
+just a key for the pod, so detach first. Like `s`, it is not offered in
+`--readonly`, and on the demo it says there is no shell instead of quitting.
+
 ### Contexts
 
 `:ctx` lists kubeconfig contexts in the main panel, numbered like a
@@ -275,6 +283,8 @@ Notable behavior:
 - **Logs** (`l`) follows the stream live, like `kubectl logs -f`.
 - **Shell** (`s`) opens a real interactive exec session **inside the main
   panel** — see below.
+- **Shell (terminal)** (`S`) **quits k10s** and opens the same shell in the
+  terminal you started it from — see below.
 - **Port Forward** (`p`) starts a real forward on an ephemeral local port and
   toasts the address; pressing it again stops that forward, or cancels it
   while it is still connecting.
@@ -341,7 +351,9 @@ The pickers share a **Save** button reachable with `tab`.
 
 `tab` cycles **Resources → Main → command box** in layout order, and
 `shift+tab` walks it backwards. The prompt can also be entered with `/`, `:`
-or a click, and left with esc.
+or a click, and left with esc. `left` in the main pane goes straight to the
+resource list and `right` or `enter` there comes back (not while zoomed: the
+list is off screen).
 
 The **Actions pane is not in the cycle** — every action already has a hotkey
 and a clickable row, so a tab stop there would be a keystroke that leads

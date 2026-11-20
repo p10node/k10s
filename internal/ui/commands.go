@@ -254,7 +254,7 @@ func Help() string {
                         is open it scrolls the popup, never what is behind it
 
   RESOURCE LIST (left pane)
-    tab                 focus it
+    left / tab          focus it (left from the main pane, unless zoomed)
     type to search      any letters filter the list instantly; the active
                         filter shows in the panel title. A search looks
                         inside folded groups too.
@@ -285,12 +285,14 @@ func Help() string {
     d describe · y yaml · l logs (follow, when live)
     s shell — a real interactive shell rendered inside the main panel;
       ctrl+] detaches. The rest of k10s stays visible while you are in it.
+    S shell in the terminal — quits k10s and opens the same pod shell in
+      the terminal k10s was started from; exit it to get your prompt back.
     p port-forward (real) · r rollout restart · c scale (prompts for n)
     e edit (opens $EDITOR on live YAML) · m top (metrics-server)
     o cordon/uncordon · u drain (nodes only)
     the pane lists only the actions that apply to the selected kind
     D delete (confirm dialog)
-    plugins             ~/.k10s/plugins.yaml shortcuts appear in the same pane;
+    plugins             plugins.yaml shortcuts appear in the same pane;
                         built-in keys win unless override: true
 
   COPY / SELECT

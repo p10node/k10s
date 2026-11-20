@@ -58,16 +58,30 @@ func nonInteractive(ep *clientcmdapi.ExecConfig) {
 }
 
 // stderrTap is os.Stderr rerouted through a pipe k10s reads (rule 2). It
-// remembers only the last non-empty line and when it arrived: plugins say
-// one useful thing, at the end, and a message from a different attempt
-// must not be pinned on this one.
+// remembers the last non-empty line and when it arrived: plugins say one
+// useful thing, at the end, and a message from a different attempt must not
+// be pinned on this one. It also keeps the last tailSize bytes of what was
+// written, line by line, for the one reader that needs more than a line:
+// main, after a panic in the TUI, whose stack trace Bubble Tea writes to
+// os.Stderr.
 type stderrTap struct {
 	mu       sync.Mutex
 	terminal *os.File // what os.Stderr was before the swap
 	pipe     *os.File // the write end now in os.Stderr
 	last     string
 	at       time.Time
+	tail     []byte        // the last tailSize bytes read, line by line
+	read     int64         // bytes read so far, for drain to see the pipe go quiet
+	done     chan struct{} // closed when the reader stops
 }
+
+// tailSize bounds stderrTap.tail. A stack trace from inside Bubble Tea is a
+// few KiB.
+const tailSize = 64 << 10
+
+// quietFor is how long drain waits for a write before it takes the pipe as
+// quiet.
+const quietFor = 50 * time.Millisecond
 
 var (
 	captureOnce sync.Once
@@ -81,17 +95,21 @@ func (t *stderrTap) start() error {
 		return err
 	}
 	t.terminal, t.pipe = os.Stderr, w
+	t.done = make(chan struct{})
 	os.Stderr = w
 	go func() {
+		defer close(t.done)
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if line == "" {
-				continue
-			}
+			raw := sc.Text()
+			line := strings.TrimSpace(raw)
 			t.mu.Lock()
-			t.last, t.at = line, time.Now()
+			t.keep(raw)
+			t.read += int64(len(raw)) + 1
+			if line != "" {
+				t.last, t.at = line, time.Now()
+			}
 			t.mu.Unlock()
 		}
 		// A line too long for the buffer ends the scan; nothing to do about
@@ -100,6 +118,50 @@ func (t *stderrTap) start() error {
 		_ = r.Close()
 	}()
 	return nil
+}
+
+// keep adds one line to the tail and drops the oldest bytes past tailSize.
+// The line is as the scanner gives it, plus a newline: a \r before the
+// newline is gone, and a last line written without one gets one. Neither
+// changes a stack trace. The caller holds t.mu.
+func (t *stderrTap) keep(line string) {
+	t.tail = append(append(t.tail, line...), '\n')
+	if over := len(t.tail) - tailSize; over > 0 {
+		t.tail = append(t.tail[:0], t.tail[over:]...)
+	}
+}
+
+// drain waits, up to wait, until nothing new has come through the pipe for
+// quietFor. Then it closes the write end, so that the reader can finish what
+// is still in the pipe, and returns the tail once it has, or once wait is up
+// again: a credential plugin that is still running holds the pipe open too.
+//
+// The quiet comes first because Run does not wait for a command's goroutine.
+// After a panic in one, Bubble Tea ends the program and only then writes the
+// stack trace, from that goroutine, which can be after Run has returned; a
+// write after the close fails and the trace is lost.
+func (t *stderrTap) drain(wait time.Duration) []byte {
+	if t.pipe == nil {
+		return nil
+	}
+	deadline := time.Now().Add(wait)
+	for prev := int64(-1); time.Now().Before(deadline); time.Sleep(quietFor) {
+		t.mu.Lock()
+		n := t.read
+		t.mu.Unlock()
+		if n == prev {
+			break
+		}
+		prev = n
+	}
+	_ = t.pipe.Close()
+	select {
+	case <-t.done:
+	case <-time.After(wait):
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.tail...)
 }
 
 // said returns the last line written at or after since, "" if none. The
@@ -146,6 +208,17 @@ func ReleaseStderr() {
 	if tap.terminal != nil {
 		os.Stderr = tap.terminal
 	}
+}
+
+// DrainStderr ends the capture and returns the last 64 KiB of what it read,
+// line by line, for main when the TUI ended in a panic: Bubble Tea prints
+// the panic to stdout but its stack trace to os.Stderr, which was the pipe.
+// It waits up to wait for the pipe to go quiet, and up to wait again for the
+// reader to finish (see stderrTap.drain). Call it after ReleaseStderr, at
+// the end of the process: a credential plugin started after it would find
+// its stderr closed. Without a capture it returns nil.
+func DrainStderr(wait time.Duration) []byte {
+	return tap.drain(wait)
 }
 
 // TerminalStderr is the terminal's stderr whether or not CaptureStderr has

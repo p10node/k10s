@@ -3,6 +3,7 @@ package k8s
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
@@ -248,6 +250,97 @@ func TestCredentialPluginNamesTheContextsPlugin(t *testing.T) {
 	for ctx, want := range map[string]string{"": "tsh", "tp": "tsh", "kind": "", "lost": "", "absent": ""} {
 		if got := credentialPlugin(raw, ctx); got != want {
 			t.Errorf("credentialPlugin(%q) = %q, want %q", ctx, got, want)
+		}
+	}
+}
+
+// What the tap read comes back line by line, tabs and blank lines kept: a
+// stack trace without its indentation is hard to read.
+func TestDrainStderrGivesBackWhatWasWritten(t *testing.T) {
+	captureStderrForTest(t)
+	want := "earlier\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:10 +0x1d\n"
+	if _, err := os.Stderr.WriteString(want); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(tap.drain(time.Second)); got != want {
+		t.Errorf("drain = %q, want %q", got, want)
+	}
+}
+
+// The tail keeps the newest tailSize bytes and drops the oldest.
+func TestStderrTailKeepsTheNewestBytes(t *testing.T) {
+	captureStderrForTest(t)
+	var all strings.Builder
+	for i := 0; all.Len() < 3*tailSize; i++ {
+		fmt.Fprintf(&all, "line %06d %s\n", i, strings.Repeat("x", 80))
+	}
+	if _, err := os.Stderr.WriteString(all.String()); err != nil {
+		t.Fatal(err)
+	}
+	got := string(tap.drain(time.Second))
+	if len(got) != tailSize {
+		t.Errorf("tail is %d bytes, want %d", len(got), tailSize)
+	}
+	if !strings.HasSuffix(all.String(), got) {
+		t.Error("the tail is not the end of what was written")
+	}
+}
+
+// panicsInUpdate panics on Bubble Tea's event loop, and panicsInCommand in a
+// command's own goroutine: the two kinds of panic Bubble Tea recovers.
+type panicsInUpdate struct{}
+
+type boom struct{}
+
+func (panicsInUpdate) Init() tea.Cmd {
+	return func() tea.Msg { return boom{} }
+}
+
+func (m panicsInUpdate) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(boom); ok {
+		panic("boom in Update")
+	}
+	return m, nil
+}
+
+func (panicsInUpdate) View() string { return "" }
+
+type panicsInCommand struct{}
+
+func panicInCommand() tea.Msg { panic("boom in a command") }
+
+func (panicsInCommand) Init() tea.Cmd { return panicInCommand }
+
+func (m panicsInCommand) Update(tea.Msg) (tea.Model, tea.Cmd) { return m, nil }
+
+func (panicsInCommand) View() string { return "" }
+
+// Bubble Tea writes a recovered panic's stack trace to os.Stderr, which is the
+// pipe while the TUI runs, so after either kind of panic the trace is in the
+// tail that main writes out.
+func TestBubbleTeaPanicStackTracesReachTheTail(t *testing.T) {
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = devNull // Bubble Tea prints the panic itself there
+	t.Cleanup(func() {
+		os.Stdout = stdout
+		_ = devNull.Close()
+	})
+	captureStderrForTest(t)
+
+	for _, m := range []tea.Model{panicsInUpdate{}, panicsInCommand{}} {
+		p := tea.NewProgram(m, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutSignalHandler())
+		if _, err := p.Run(); !errors.Is(err, tea.ErrProgramPanic) {
+			t.Fatalf("Run(%T) = %v, want %v", m, err, tea.ErrProgramPanic)
+		}
+	}
+	tail := string(tap.drain(time.Second))
+	for _, frame := range []string{"k8s.panicsInUpdate.Update(", "k8s.panicInCommand("} {
+		if !strings.Contains(tail, frame) {
+			t.Errorf("no %s in the tail:\n%s", frame, tail)
 		}
 	}
 }
