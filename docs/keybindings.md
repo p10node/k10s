@@ -64,7 +64,8 @@ a hotkey and a clickable row, so a tab stop there would lead nowhere.
 
 `left` in the main pane goes straight to the resource list, and `right` or
 `enter` there comes back. While the main pane is zoomed, `left` stays put:
-the list is off screen.
+the list is off screen. Held down, `left` stops at the list: its repeats do
+not fold the group there, a fresh press a moment later does.
 
 Clicking a resource row or an action acts on it without moving focus. The
 Resources pane scrolls with the wheel **without changing what is selected**

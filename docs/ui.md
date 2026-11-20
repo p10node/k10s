@@ -353,7 +353,8 @@ The pickers share a **Save** button reachable with `tab`.
 `shift+tab` walks it backwards. The prompt can also be entered with `/`, `:`
 or a click, and left with esc. `left` in the main pane goes straight to the
 resource list and `right` or `enter` there comes back (not while zoomed: the
-list is off screen).
+list is off screen). Held down, `left` stops at the list rather than folding
+the group it lands on.
 
 The **Actions pane is not in the cycle** — every action already has a hotkey
 and a clickable row, so a tab stop there would be a keystroke that leads
