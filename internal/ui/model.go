@@ -2898,6 +2898,14 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			return nil
 		}
 	}
+	if m.mode == modeLogs {
+		for _, c := range m.logControls() {
+			if zone.Get("log:" + c.id).InBounds(msg) {
+				m.runLogControl(c.id)
+				return nil
+			}
+		}
+	}
 	for _, a := range Actions {
 		if zone.Get("act:" + a.ID).InBounds(msg) {
 			return tea.Batch(m.flashAction(a.ID), m.fireAction(a))

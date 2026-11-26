@@ -574,3 +574,64 @@ func TestToastOnlyActionsAlsoShowLoading(t *testing.T) {
 		t.Error("an action whose result is only a toast should still show loading")
 	}
 }
+
+// While logs are open, the Actions pane lists the viewer's own keys above
+// the resource actions, and the pause row turns into follow once paused.
+func TestActionsPaneListsLogControls(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+
+	if pane := stripANSI(m.viewActions(30, 30).String()); strings.Contains(pane, "close logs") {
+		t.Errorf("log controls shown with no logs open:\n%s", pane)
+	}
+
+	openLogs(t, m)
+	pane := stripANSI(m.viewActions(30, 30).String())
+	for _, want := range []string{"[↑] pause", "[esc] close logs", "Describe"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("pane is missing %q while following:\n%s", want, pane)
+		}
+	}
+	if strings.Contains(pane, "follow") {
+		t.Errorf("follow offered while already following:\n%s", pane)
+	}
+
+	m.move(-3)
+	pane = stripANSI(m.viewActions(30, 30).String())
+	if !strings.Contains(pane, "[end] follow") || strings.Contains(pane, "pause") {
+		t.Errorf("paused, the pane should offer follow instead of pause:\n%s", pane)
+	}
+}
+
+// Each log control row does what its key does when clicked.
+func TestLogControlRowsAreClickable(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	openLogs(t, m)
+
+	if !clickZone(m, "log:pause") {
+		t.Fatal("no pause row in the Actions pane")
+	}
+	if m.logFollow {
+		t.Error("clicking pause should stop following")
+	}
+	before := m.logScroll
+	m.Update(logLineMsg{gen: m.logGen, line: "new entry", ok: true})
+	if m.logScroll != before+1 {
+		t.Errorf("logScroll = %d, want %d: the paused view should hold still", m.logScroll, before+1)
+	}
+
+	if !clickZone(m, "log:follow") {
+		t.Fatal("no follow row in the Actions pane once paused")
+	}
+	if !m.logFollow || m.logScroll != 0 {
+		t.Errorf("follow = %v, logScroll = %d, want following at the bottom", m.logFollow, m.logScroll)
+	}
+
+	if !clickZone(m, "log:close") {
+		t.Fatal("no close row in the Actions pane")
+	}
+	if m.mode != modeTable {
+		t.Errorf("mode = %v, want the table after close", m.mode)
+	}
+}

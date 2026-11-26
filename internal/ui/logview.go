@@ -256,6 +256,39 @@ func (m *Model) logScrollBy(delta int) {
 	m.logFollow = m.logScroll == 0
 }
 
+// logControl is a row the Actions pane shows while the log viewer is open,
+// so pausing, resuming and closing it can be found without already knowing
+// that scrolling up pauses the stream.
+type logControl struct {
+	id, key, label string
+}
+
+// logControls lists the log viewer's rows for the Actions pane. Pause and
+// follow take turns, so only the one that would change something is shown.
+func (m *Model) logControls() []logControl {
+	toggle := logControl{id: "pause", key: "↑", label: "pause"}
+	if !m.logFollow {
+		toggle = logControl{id: "follow", key: "end", label: "follow"}
+	}
+	return []logControl{toggle, {id: "close", key: "esc", label: "close logs"}}
+}
+
+// runLogControl does what a clicked log control row says, like its key.
+func (m *Model) runLogControl(id string) {
+	switch id {
+	case "pause":
+		// A click pauses where the view is rather than scrolling one line
+		// like ↑ does. Lines arriving below grow the offset as for any
+		// paused view, so what is on screen stays put.
+		m.logFollow = false
+	case "follow":
+		m.logScroll = 0
+		m.logFollow = true
+	case "close":
+		m.backToTable()
+	}
+}
+
 // logNeedsOlder reports whether the view has reached the oldest loaded line
 // and should pull the next page.
 //
