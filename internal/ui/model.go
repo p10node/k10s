@@ -192,6 +192,11 @@ type Model struct {
 	lastClickRow int
 	lastClickAt  time.Time
 
+	// When left last took focus from the main pane to the resource list, or
+	// came again as that key still held down. Any other key clears it. See
+	// heldKeyWindow.
+	leftHeldAt time.Time
+
 	// An interactive shell rendered inside the main panel: the live exec
 	// stream plus the terminal emulator its output is fed into.
 	shellSess domain.ShellSession
@@ -1299,6 +1304,9 @@ func (m *Model) switchContextCmd(name string) tea.Cmd {
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if key != "left" {
+		m.leftHeldAt = time.Time{} // any other key ends a held left
+	}
 
 	// A running shell owns the keyboard: everything except the detach key
 	// belongs to the program in the pod — ctrl+c included, since interrupting
@@ -1465,7 +1473,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case "left":
 			// The tree-shaped half of the pairing with "right": fold this
-			// group away. Space is the toggle that also opens it again.
+			// group away. Space is the toggle that also opens it again. The
+			// repeats of a left still held from the main pane only meant to
+			// get here, so they fold nothing.
+			if now := time.Now(); now.Sub(m.leftHeldAt) < heldKeyWindow {
+				m.leftHeldAt = now
+				return nil
+			}
 			if m.search == "" && !m.collapsed[m.curKind().Group] {
 				m.toggleGroup(m.curKind().Group)
 			}
@@ -1594,6 +1608,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// not bound with it: docs/plan.md gives "h" to Helm's history.
 		if !m.zoomed {
 			m.focus = focusList
+			m.leftHeldAt = time.Now()
 		}
 	case "T":
 		m.themeIdx = (m.themeIdx + 1) % len(m.themes)
@@ -1792,6 +1807,14 @@ func (m *Model) scrollMain(delta int) {
 // as one double-click. Bubbletea reports presses individually, so the pair
 // has to be recognised here.
 const doubleClickWindow = 400 * time.Millisecond
+
+// heldKeyWindow is how soon a left must follow the previous one to count as
+// the same key still held down. Terminals send a held key's repeats as fresh
+// presses: the first after the keyboard's repeat delay (0.5 s on macOS by
+// default, 660 ms in the X server's defaults), then many times a second.
+// Without it, one long press of left in the main pane would move focus to the
+// resource list and then fold the group there, a choice that is saved.
+const heldKeyWindow = 750 * time.Millisecond
 
 // flashLen is how long a clicked action stays lit. Long enough to register,
 // short enough not to feel like a stuck state.

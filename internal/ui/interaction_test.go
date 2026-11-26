@@ -164,6 +164,81 @@ func TestLeftWhileZoomedStaysInTheMainPane(t *testing.T) {
 	}
 }
 
+// A terminal sends a held key's repeats as fresh presses. The first left takes
+// focus to the resource list; its repeats must not go on to fold the group
+// there, a fold that is saved and outlives the session.
+func TestHeldLeftStopsAtTheResourceList(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusMain
+	g := m.curKind().Group
+	if m.collapsed[g] {
+		t.Fatalf("%s starts folded; the test needs an open group", g)
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	// Each repeat comes a little inside the window after the one before: a
+	// long press lasts as long as it keeps repeating, not one window in all.
+	for i := 0; i < 2; i++ {
+		m.leftHeldAt = m.leftHeldAt.Add(-heldKeyWindow * 4 / 5)
+		m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	}
+	if m.focus != focusList {
+		t.Fatalf("held left landed on %v, want focusList", m.focus)
+	}
+	if m.collapsed[g] {
+		t.Errorf("held left folded %s", g)
+	}
+}
+
+// Once the key is let go, the next left is a fresh press and folds as before.
+func TestLeftFoldsAgainAfterAPause(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusMain
+	g := m.curKind().Group
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	m.leftHeldAt = m.leftHeldAt.Add(-2 * heldKeyWindow)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.collapsed[g] {
+		t.Errorf("left after a pause did not fold %s", g)
+	}
+}
+
+// Any other key in between means left was let go, so the next left folds at
+// once.
+func TestAnotherKeyEndsAHeldLeft(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusMain
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	g := m.curKind().Group
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.collapsed[g] {
+		t.Errorf("left after down did not fold %s", g)
+	}
+}
+
+// With the resource list already focused no key is being held from the main
+// pane, so left folds at once.
+func TestLeftInTheResourceListFoldsAtOnce(t *testing.T) {
+	m := newTestModel(t, mock.New(""))
+	dismissOnboarding(m)
+	m.focus = focusList
+	g := m.curKind().Group
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.collapsed[g] {
+		t.Errorf("left in the resource list did not fold %s", g)
+	}
+	if !m.leftHeldAt.IsZero() {
+		t.Errorf("left in the resource list started a held left at %v", m.leftHeldAt)
+	}
+}
+
 // The resource pane is focusable again, and typing there filters the list.
 func TestResourcePaneIsFocusableAndFilters(t *testing.T) {
 	m := newTestModel(t, mock.New(""))
