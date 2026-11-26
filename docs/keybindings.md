@@ -188,7 +188,10 @@ reference in [commands.md](commands.md), and `:aliases` prints it in-app.
 | `esc`          | close                                                    |
 
 Newest is line `1` at the bottom, numbers count upward, long lines wrap, and
-level tokens are coloured.
+level tokens are coloured. While logs are open, the Actions pane lists
+`↑` pause (or `end` follow once paused) and `esc` close logs above the usual
+actions; clicking one does the same as its key, except that pause stops in
+place instead of scrolling a line.
 
 ## Overlays
 

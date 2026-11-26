@@ -276,7 +276,9 @@ Neither pane keeps a search box on screen permanently:
 Header shows the current target (`po/name`). The pane lists **only actions
 that apply to the selected kind** — no dimmed rows. Risky actions (Drain,
 Delete) sit below a rule and are drawn in the error color. With no cluster
-it lists nothing at all — see [No cluster](#no-cluster).
+it lists nothing at all — see [No cluster](#no-cluster). While the
+[log viewer](#log-viewer) is open, its own keys come first: `↑` pause, or
+`end` follow once paused, and `esc` close logs.
 
 Notable behavior:
 

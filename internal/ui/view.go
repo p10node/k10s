@@ -858,6 +858,16 @@ func (m *Model) viewActions(w, h int) Block {
 		s(th.Subtle).Render(" " + trunc(r.Short+"/"+m.curName(), inner-1)),
 		s(th.Border).Render(strings.Repeat("╌", inner)),
 	}
+	// While logs are open, their own keys come first: nothing else on
+	// screen says that scrolling up pauses the stream.
+	if m.mode == modeLogs {
+		for _, c := range m.logControls() {
+			row := s(th.Border).Render(" [") + s(th.Accent2).Render(c.key) + s(th.Border).Render("] ") +
+				s(th.Fg).Render(trunc(c.label, inner-lipgloss.Width(c.key)-5))
+			lines = append(lines, m.mark("log:"+c.id, padBG(row, inner, th.Bg)))
+		}
+		lines = append(lines, s(th.Border).Render(strings.Repeat("╌", inner)))
+	}
 	// Only actions that actually apply to the selected kind are listed —
 	// a pane of greyed-out rows is noise, and the list is short enough that
 	// its contents change legibly as you move between kinds.

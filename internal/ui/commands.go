@@ -290,7 +290,8 @@ func Help() string {
     p port-forward (real) · r rollout restart · c scale (prompts for n)
     e edit (opens $EDITOR on live YAML) · m top (metrics-server)
     o cordon/uncordon · u drain (nodes only)
-    the pane lists only the actions that apply to the selected kind
+    the pane lists only the actions that apply to the selected kind;
+      with logs open it also lists ↑ pause / end follow and esc close
     D delete (confirm dialog)
     plugins             plugins.yaml shortcuts appear in the same pane;
                         built-in keys win unless override: true
